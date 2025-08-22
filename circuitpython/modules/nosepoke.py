@@ -7,8 +7,9 @@ import time
 from adafruit_mcp2515.canio import Message, RemoteTransmissionRequest
 from adafruit_mcp2515 import MCP2515 as CAN
 
-is_init = False
-nose_poke = False
+from can_manager import CanManager
+
+nose_poke = time.monotonic()
 time_ref = time.monotonic_ns()
 
 class PhotoInterrupter:
@@ -21,82 +22,61 @@ class PhotoInterrupter:
     async def catch_interrupt(self):
         """Print a message when pin goes low."""
         global nose_poke
+        last_count = 0
         with self.sensor_out as interrupt:
             while True:
-                print(f"In catch interrupt #{interrupt.count}")
-                if interrupt.count > 0:
-                    interrupt.count = 0
-                    nose_poke = True
+                if interrupt.count != last_count:
+                    print(f"In catch interrupt #{interrupt.count - last_count}")
+                    last_count = interrupt.count
+                    nose_poke = time.monotonic()
                 # Let another task run.
-                await asyncio.sleep(1)
+                await asyncio.sleep(0.02)
 
-def can_init(can_cs):
-    cs = digitalio.DigitalInOut(can_cs)
-    cs.switch_to_output()
-    spi = board.SPI()
-    can_bus = CAN(
-        spi, cs, silent=False
-    )
-    return can_bus
+class ModuleManager:
+    def __init__(self):
+        self.led = digitalio.DigitalInOut(board.D25)
+        self.led.direction = digitalio.Direction.OUTPUT
+        self.led.value = True
 
-def init():
-    # Status led
-    global is_init
-    led = digitalio.DigitalInOut(board.D25)
-    led.direction = digitalio.Direction.OUTPUT
+        self.can_manager = CanManager()
+        self.can_manager.register_rx_callback(self.can_msg_handler)
 
-    can_bus = can_init(board.CAN_CS)
+        self.sensor = PhotoInterrupter(in_pin=board.D10, out_pin=board.D9)
 
-    led.value = True
-    is_init = True
-    sensor = PhotoInterrupter(in_pin=board.D10, out_pin=board.D9)
-    return led, can_bus, sensor
+    def can_msg_handler(self, msg):
+        if not isinstance(msg, Message):
+            return
+        print(f'CAN_RX: ID={msg.id}, DATA={list(msg.data)}')
+        if b"0x0000" in msg.data:
+            self.can_manager.send_urgent(can_id = 0x169, data=b"ACK")
 
-async def can_rx(can_bus):
-    global is_init
-    if not is_init :
-        return
-    last_time = 0
-    while True:
-        time_now = time.monotonic_ns()
-        print(f"CAN RX {(time_now - last_time) / 1_000_000} ms since last exec")
-        last_time = time_now
-        await asyncio.sleep(1)
+    async def check_poke(self):
+        global nose_poke
+        last_poke = nose_poke
+        while True:
+            if last_poke != nose_poke:
+                print("Nose Poke")
+                last_poke = nose_poke
+                self.led.value = True
+                self.can_manager.send_normal(can_id=0x169, data=b"NPK")
+            else:
+                self.led.value = False
+            await asyncio.sleep(0.1)
 
+    async def start_managers(self):
+        global time_ref
+        time_ref = time.monotonic_ns()
 
-async def can_tx(can_bus):
-    global is_init
-    if not is_init :
-        return
-    last_time = 0
-    while True:
-        time_now = time.monotonic_ns()
-        print(f"CAN TX {(time_now - last_time)/1_000_000} ms since last exec")
-        last_time = time_now
-        await asyncio.sleep(1)
-
-async def led_manager(led):
-    global nose_poke
-    if nose_poke:
-        print("Nose Poke")
-        nose_poke = False
-        led.value = True
-    else:
-        led.value = False
-    await asyncio.sleep(0.1)
-
-async def main():
-    global time_ref
-    time_ref = time.monotonic_ns()
-    led, can_bus, sensor = init()
-    tasks = [
-        asyncio.create_task(can_rx(can_bus)),
-        asyncio.create_task(can_tx(can_bus)),
-        asyncio.create_task(sensor.catch_interrupt()),
-        asyncio.create_task(led_manager(led))
-    ]
-    await asyncio.gather(*tasks)
+        tasks = [
+            asyncio.create_task(self.can_manager.can_rx_task()),
+            asyncio.create_task(self.can_manager.can_tx_task()),
+            asyncio.create_task(self.sensor.catch_interrupt()),
+            asyncio.create_task(self.check_poke())
+        ]
+        await asyncio.gather(*tasks)
 
 # Start tasks
-print("Let's go!")
-asyncio.run(main())
+if __name__ == "__main__":
+    nose_poke = ModuleManager()
+    print("Nose Poke started")
+    asyncio.run(nose_poke.start_managers())

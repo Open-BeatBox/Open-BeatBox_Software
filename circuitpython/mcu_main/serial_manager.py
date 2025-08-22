@@ -12,7 +12,7 @@ import usb_cdc
 
 class SerialManager:
     def __init__(self):
-        self.tx_queue = asyncio.Queue()
+        self.tx_queue = []
         self.command_callbacks = []
         self.last_activity = time.monotonic()
 
@@ -28,7 +28,7 @@ class SerialManager:
         """Register callback for received commands"""
         self.command_callbacks.append(callback)
 
-    async def send_message(self, message):
+    def send_message(self, message):
         """Queue message for transmission"""
         self.tx_queue.append(str(message))
 

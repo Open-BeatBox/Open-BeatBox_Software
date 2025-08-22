@@ -19,10 +19,9 @@ class CanManager:
 
         self.can_bus = CAN(spi, cs, baudrate=250000, crystal_freq=8000000)
 
-        # High priority queue for urgent CAN messages
-        self.urgent_tx_queue = asyncio.Queue()
-        # Normal priority queue for routine messages
-        self.normal_tx_queue = asyncio.Queue()
+        # Use simple lists instead of asyncio.Queue (not available in CircuitPython)
+        self.urgent_tx_queue = []
+        self.normal_tx_queue = []
 
         # Received messages with timestamps
         self.rx_callbacks = []
@@ -35,13 +34,15 @@ class CanManager:
         """Register callback for received CAN messages"""
         self.rx_callbacks.append(callback)
 
-    async def send_urgent(self, can_id, data):
+    def send_urgent(self, can_id, data):
         """Send high-priority CAN message"""
-        await self.urgent_tx_queue.put({'id': can_id, 'data': data})
+        message = Message(can_id, data)
+        self.urgent_tx_queue.append(message)
 
-    async def send_normal(self, can_id, data):
+    def send_normal(self, can_id, data):
         """Send normal-priority CAN message"""
-        await self.normal_tx_queue.put({'id': can_id, 'data': data})
+        message = Message(can_id, data)
+        self.normal_tx_queue.append(message)
 
     async def can_rx_task(self):
         """High-priority CAN receive task - must process within 20ms"""
@@ -65,8 +66,7 @@ class CanManager:
                     # Call all registered callbacks
                     for callback in self.rx_callbacks:
                         try:
-                            # Callbacks must be non-blocking
-                            callback(msg_data)
+                            callback(message)
                         except Exception as e:
                             print(f"CAN RX callback error: {e}")
 
@@ -78,14 +78,14 @@ class CanManager:
                     if processing_time > self.rx_stats['max_delay']:
                         self.rx_stats['max_delay'] = processing_time
 
-                    if processing_time > 15:  # Warn if approaching limit
+                    if processing_time > 15:
                         print(f"Warning: CAN RX processing took {processing_time:.1f}ms")
 
             except Exception as e:
                 print(f"CAN RX error: {e}")
 
             # Very short sleep to maintain priority but allow other tasks
-            await asyncio.sleep(0.005)  # 5ms max between checks
+            await asyncio.sleep(0.005)
 
     async def can_tx_task(self):
         """CAN transmit task with priority handling"""
@@ -94,19 +94,14 @@ class CanManager:
         while True:
             try:
                 # Check urgent queue first
-                try:
-                    msg = self.urgent_tx_queue.get_nowait()
+                if self.urgent_tx_queue:
+                    msg = self.urgent_tx_queue.pop(0)
                     await self._send_message(msg)
-                    continue  # Immediately check for more urgent messages
-                except asyncio.QueueEmpty:
-                    pass
+                    continue  # Check again for urgent
 
-                # Check normal queue if no urgent messages
-                try:
-                    msg = await asyncio.wait_for(self.normal_tx_queue.get(), timeout=0.010)
+                if self.normal_tx_queue:
+                    msg = self.normal_tx_queue.pop(0)
                     await self._send_message(msg)
-                except asyncio.TimeoutError:
-                    pass  # No messages to send
 
             except Exception as e:
                 print(f"CAN TX error: {e}")
@@ -114,8 +109,8 @@ class CanManager:
             # Brief yield to RX task
             await asyncio.sleep(0.002)
 
-    async def _send_message(self, msg_data):
+    async def _send_message(self, msg):
         """Internal method to send CAN message"""
-        message = Message(id=msg_data['id'], data=msg_data['data'])
-        self.can_bus.send(message)
-        print(f"CAN TX: ID=0x{msg_data['id']:03X}")
+        self.can_bus.send(msg)
+        data = int.from_bytes(msg.data, byteorder='little')
+        print(f"CAN TX: ID=0x{msg.id:03X}, DATA={data}")
