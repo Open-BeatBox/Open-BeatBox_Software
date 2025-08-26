@@ -311,7 +311,7 @@ class StatisticalSerialTester:
                     f.write(f"\nRAW TIMING DATA (ms)\n")
                     f.write("-" * 30 + "\n")
                     for i, time_val in enumerate(times, 1):
-                        f.write(f"{i:5d}: {time_val:8.2f}\n")
+                        f.write(f"{i:5d}; {time_val:8.2f}\n")
 
                 # Issues log
                 if stats['unexpected_messages']:
@@ -340,8 +340,8 @@ def main():
     print("=" * 50)
 
     # Configuration - adjust as needed
-    PORT = '/dev/ttyACM1'  # usb_cdc.data port
-    BAUDRATE = 115200
+    PORT = '/dev/ttyACM2'  # usb_cdc.data port
+    BAUDRATE = 921600
     TIMEOUT = 3.0
     INTERVAL = 0
     MAX_TESTS = None  # Set to number for limited run

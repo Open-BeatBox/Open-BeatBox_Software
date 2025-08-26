@@ -7,18 +7,27 @@ import time
 import board
 import busio
 import digitalio
+
+from adafruit_bus_device.spi_device import SPIDevice
 from adafruit_mcp2515 import MCP2515 as CAN
 from adafruit_mcp2515.canio import Message
+
 
 class CanManager:
     def __init__(self):
         # Hardware setup
         spi = busio.SPI(board.SCK, board.MOSI, board.MISO)
+        self.spi = spi
         cs = digitalio.DigitalInOut(board.CAN_CS)
         cs.direction = digitalio.Direction.OUTPUT
 
-        self.can_bus = CAN(spi, cs, baudrate=250000, crystal_freq=8000000)
+        self.can_bus = CAN(spi, cs, baudrate=1_000_000, crystal_freq=16_000_000)
 
+        # Replace the SPI device with a faster one
+        # FIXME: this is ugly, create a wrapper or modify MCP2515 lib instead
+        self.can_bus._spi_device = SPIDevice(spi, cs, baudrate=10_000_000)
+
+        print(f"SPI Freq = {self.spi.frequency}")
         # Use simple lists instead of asyncio.Queue (not available in CircuitPython)
         self.urgent_tx_queue = []
         self.normal_tx_queue = []
@@ -112,5 +121,6 @@ class CanManager:
     async def _send_message(self, msg):
         """Internal method to send CAN message"""
         self.can_bus.send(msg)
+        print(f"SPI Freq = {self.spi.frequency}")
         data = int.from_bytes(msg.data, byteorder='little')
         print(f"CAN TX: ID=0x{msg.id:03X}, DATA={data}")

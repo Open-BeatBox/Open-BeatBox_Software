@@ -30,6 +30,8 @@ class CANHandshakeProfiler:
         cs = DigitalInOut(cs_pin)
         self.can_bus = CAN(spi_bus, cs, baudrate=baudrate)
 
+
+
         # Timing storage
         self.timing_results = []
         self.handshake_stats = {
