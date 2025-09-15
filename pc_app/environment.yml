@@ -1,0 +1,13 @@
+name: beatbox
+channels:
+  - conda-forge
+dependencies:
+  - python>=3.11
+  - ipython  # just for convenience
+  - configobj
+  - pyserial
+  - qtpy
+  - pyqt=5
+  - pyqtgraph
+  - qdarkstyle
+  - pytest  # for testing only
