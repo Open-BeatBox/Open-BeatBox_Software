@@ -173,6 +173,17 @@ class BaseExperimentManager(QtCore.QObject, metaclass=QABCMeta):
         if auto_start:
             self.__post_init_phases()  # Start the state machine (manages the event sequence)
 
+    def start_experiment(self):
+        self.start_state_machine()
+
+    def end_experiment(self):
+        # TODO: close file handler ? set new file logging, log summary experiment infos
+        if self._timer.isActive():
+            self._timer.stop()
+        self._timer = None # reset any ongoing timer
+        self._phase_iti() # reset to a known state
+        self.log(logging.INFO, 'Experiment ended.')
+
     def _setup_file_logging(self):
         log_dir = Path(self.experiment_folder)
         log_path = log_dir / 'experiment_status.csv'
@@ -202,6 +213,7 @@ class BaseExperimentManager(QtCore.QObject, metaclass=QABCMeta):
                           "Please define it in the subclass to start the state machine.")
 
     def start_state_machine(self):
+        # IMPROVEMENT: differentiate starting the state machine experiment initialization
         if not self._phase_table:
             raise ValueError("Phase table is not defined.")
         for phase, spec in self._phase_table.items():
@@ -549,7 +561,7 @@ class BeatBoxExperimentManagerS2(BeatBoxExperimentManagerS1):
         self.performance = []
         self.tunnel_entered = False  # whether the tunnel has been entered
         self.touch_result = None  # 'correct', 'incorrect', or None
-        self.reward_ms = 20   # FIXME: random
+        self.reward_ms = 20000   # FIXME: random, TODO: parametrize
 
         # Exactly alternating sides for the screens
         self.screen_sides = ['right' if i % 2 else 'left' for i in range(1, n_trials + 1)]

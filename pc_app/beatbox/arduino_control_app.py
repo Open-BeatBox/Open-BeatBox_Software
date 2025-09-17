@@ -123,9 +123,9 @@ class ArduinoControlApp(QtWidgets.QMainWindow):
         experiment_layout.addWidget(QtWidgets.QLabel("Inter trial (ms):"))
         experiment_layout.addWidget(self.inter_trial_spinbox)
 
-        self.start_experiment_btn = QtWidgets.QPushButton("Start Experiment")
-        self.start_experiment_btn.clicked.connect(self.experiment_manager.start_state_machine)
-        experiment_layout.addWidget(self.start_experiment_btn)
+        self.experiment_state_btn = QtWidgets.QPushButton("Start Experiment")
+        self.experiment_state_btn.clicked.connect(self.start_experiment)
+        experiment_layout.addWidget(self.experiment_state_btn)
 
         main_layout.addWidget(experiment_group)
 
@@ -248,6 +248,17 @@ class ArduinoControlApp(QtWidgets.QMainWindow):
 
     def start_experiment(self):
         self.experiment_manager.start_experiment()
+        self.experiment_state_btn.setText("Stop Experiment")
+        self.experiment_state_btn.clicked.disconnect(self.start_experiment)
+        self.experiment_state_btn.clicked.connect(self.stop_experiment)
+
+    def stop_experiment(self):
+        # TODO: add end of experiment logging
+        self.experiment_manager.end_experiment()
+        self.experiment_state_btn.setText("Start Experiment")
+        self.experiment_state_btn.clicked.disconnect(self.stop_experiment)
+        self.experiment_state_btn.clicked.connect(self.start_experiment)
+        logger.debug("Stopping experiment.")
 
     def setup_neopixels_ui(self, main_layout):
         neopixel_group = QtWidgets.QGroupBox("Neopixel Control")
@@ -357,6 +368,7 @@ class ArduinoControlApp(QtWidgets.QMainWindow):
     def on_handshake(self):
         self.append_log('Handshake completed.', logging.INFO)
 
+    # TODO: add comments
     def send_set_command(self, checked_pins=None):
         if not isinstance(checked_pins, (list, tuple)):
             checked_pins = None  # A status value was passed instead. Overwrite
