@@ -474,41 +474,47 @@ class BeatBoxCommunicator(QtCore.QObject):  # needs to inherit from QObject to u
             try:
                 # blocks until at least one byte is available or timeout occurs.
                 data = self.serial_port.read(self.serial_port.in_waiting or 1)
-                if data:
-                    self.rx_buffer += data
+                if not data:
+                    raise BufferError("No byte available or EOF reached.")
 
-                    if self.rx_buffer.count(b'ready:') > 1:
-                        logger.debug("Multiple handshake messages received, taking the latest one.")
-                        self.rx_buffer = self.rx_buffer.rsplit(b'ready:', 1)[-1]
+                self.rx_buffer += data
 
-                    # Process complete lines
-                    while b'\n' in self.rx_buffer:
-                        line = None  # For error reporting
-                        message = None  # For error reporting
-                        line, self.rx_buffer = self.rx_buffer.split(b'\n', 1)
-                        line = line.strip()
-                        if line:
-                            # Parse the line into a BeatBoxMessage
-                            message = BeatBoxMessage.from_bytes(line)
-                            if not message.is_valid():
-                                logger.error(f"Invalid message received: {line}, {message.get_error()}")
+                if self.rx_buffer.count(b'ready:') > 1:
+                    logger.debug("Multiple handshake messages received, taking the latest one.")
+                    self.rx_buffer = self.rx_buffer.rsplit(b'ready:', 1)[-1]
 
-                            logger.debug(f"Received: {line.decode()}")
-                            # TODO: refactor using switch case
-                            if message.command == 'ack':
-                                self.handle_ack(message)
-                            elif message.command == 'ready':
-                                logging.warning(f'Received ready message "{line.decode()}" outside of handshake.')
-                                self.send_message('ready:')
-                                self.handshakeCompleted.emit()
-                            elif message.command in ('starting', 'inited'):
-                                logging.warning(f"Warning, got {message.command}, this should be reserved to handshake.")
-                            else:
-                                if message.command == 'state':
-                                    state_value = message.decode_payload()[0]
-                                    self.stateValueReceived.emit(state_value)  # tell the ExperimentMgr
-                                else:
-                                    self.messageReceived.emit(message)
+                # Process complete lines
+                while b'\n' in self.rx_buffer:
+                    line = None  # For error reporting
+                    message = None  # For error reporting
+                    line, self.rx_buffer = self.rx_buffer.split(b'\n', 1)
+                    line = line.strip()
+                    if not line:
+                        continue # empty line
+                    # Parse the line into a BeatBoxMessage
+                    message = BeatBoxMessage.from_bytes(line)
+                    if not message.is_valid():
+                        raise Exception(f"Invalid message received: {line}, {message.get_error()}")
+
+                    logger.debug(f"Received: {line.decode()}")
+                    # TODO: refactor using switch case
+                    if message.command == 'ack':
+                        self.handle_ack(message)
+                    elif message.command == 'ready':
+                        logging.warning(f'Received ready message "{line.decode()}" outside of handshake.')
+                        self.send_message('ready:')
+                        self.handshakeCompleted.emit()
+                    elif message.command in ('starting', 'inited'):
+                        logging.warning(f"Warning, got {message.command}, this should be reserved to handshake.")
+                    else:
+                        if message.command == 'state':
+                            state_value = message.decode_payload()[0]
+                            self.stateValueReceived.emit(state_value)  # tell the ExperimentMgr
+                        else:
+                            self.messageReceived.emit(message)
+
+            except BufferError as e:
+                logger.debug(f"Serial read_loop: {e}")
 
             except Exception as e:  # Detailed error message for debugging
                 html = f"""
