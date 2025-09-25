@@ -19,7 +19,7 @@ from qtpy import QtWidgets, QtCore, QtGui
 import qdarkstyle
 
 from beatbox.bb_logging import qt_handler, logger
-from beatbox.experiment_managers import BeatBoxExperimentManagerS2
+from beatbox.experiment_managers import BeatBoxExperimentManagerS1, BeatBoxExperimentManagerS2
 from beatbox.qt_utils import LEDIndicator
 from beatbox.serial_com import get_platform_serial_ports, BeatBoxCommunicator, BeatBoxMessage, HandshakeWorker
 
@@ -44,7 +44,7 @@ class ArduinoControlApp(QtWidgets.QMainWindow):
         self.communicator.errorOccurred.connect(self.on_error)
 
         self.with_neopixels = with_neopixels
-        self.experiment_manager = BeatBoxExperimentManagerS2(experiment_folder, self.communicator,
+        self.experiment_manager = BeatBoxExperimentManagerS1(experiment_folder, self.communicator,
                                                              n_trials=n_trials,
                                                              inter_trial_interval=inter_trial_interval,
                                                              main_window=self)
@@ -200,22 +200,14 @@ class ArduinoControlApp(QtWidgets.QMainWindow):
         title = pin_name.replace("_", " ").replace("left ", "").replace("right ", "").title()
 
         if pin_name.startswith("left_"):
-            if pin_name == 'left_on':
-                widget = QtWidgets.QCheckBox(title)
-                widget.stateChanged.connect(self.send_set_command)
-            else:
-                widget = QtWidgets.QRadioButton(title)
-                self.left_button_group.addButton(widget)
-                widget.toggled.connect(lambda checked: self.send_set_command() if checked else None)
+            widget = QtWidgets.QRadioButton(title)
+            self.left_button_group.addButton(widget)
+            widget.toggled.connect(lambda checked: self.send_set_command() if checked else None)
             self.left_buttons.append(widget)  # TODO: maybe dictionary with pattern number
         elif pin_name.startswith("right_"):
-            if pin_name == 'right_on':
-                widget = QtWidgets.QCheckBox(title)
-                widget.stateChanged.connect(self.send_set_command)
-            else:
-                widget = QtWidgets.QRadioButton(title)
-                self.right_button_group.addButton(widget)
-                widget.toggled.connect(lambda checked: self.send_set_command() if checked else None)
+            widget = QtWidgets.QRadioButton(title)
+            self.right_button_group.addButton(widget)
+            widget.toggled.connect(lambda checked: self.send_set_command() if checked else None)
             self.right_buttons.append(widget)
         else:
             if pin_name == 'reward':
