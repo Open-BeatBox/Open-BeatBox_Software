@@ -55,7 +55,9 @@ class Phase(Enum):
     """
     ITI         = auto()
     WAIT_TUNNEL = auto()
+    DELIVER_PELLET = auto()
     WAIT_PELLET = auto()
+    WAIT_PELLET_RETRIEVAL = auto()
     SHOW_STIM   = auto()
     WAIT_TOUCH  = auto()
     CORRECT_RESPONSE = auto()
@@ -100,6 +102,12 @@ class PhaseSpec:
     decide: DecisionFn | None          = None
     relevant_pins: RelevantPins   = ANY_PIN # by default, ANY_PIN means any pin is relevant,
                                                              # None means ignore all pins
+    # FIXME: prefer properties instead maybe ?
+    def set_timeout(self, value):
+        if value is None or value < 0 :
+            return
+        self.timeout_ms = value
+
 
 # Grab the actual Qt metaclass that PyQt uses
 QtMeta = type(QtCore.QObject)
@@ -149,7 +157,9 @@ class BaseExperimentManager(QtCore.QObject, metaclass=QABCMeta):
         self.inter_trial_interval = inter_trial_interval
         self.reward_duration = 150  # time reward pin stays high in ms  # TODO: parametrize
         self.main_window = main_window
-        self._n_pellets_retrieved = 0
+        self.waiting_for_pellet_delivery = False
+        self.pellet_delivered = False
+        self.n_pellets_retrieved = 0
         self.waiting_for_pellet_retrieval = False  # whether the manager is waiting for a pellet to be retrieved
         self.last_pellet_retrieved = False
         self.config = ConfigObj()  # will be set in set_experiment_folder()
@@ -183,8 +193,7 @@ class BaseExperimentManager(QtCore.QObject, metaclass=QABCMeta):
     def end_experiment(self):
         # TODO: close file handler ? set new file logging, log summary experiment infos
         if self._timer.isActive():
-            self._timer.stop()
-        self._timer = None # reset any ongoing timer
+            self._timer.stop() # No need to reset counter as timer.start(timeout_ms) will do it
         self._phase_iti() # reset to a known state
         self.log(logging.INFO, 'Experiment ended.')
 
@@ -235,32 +244,33 @@ class BaseExperimentManager(QtCore.QObject, metaclass=QABCMeta):
         self._current_phase = phase
         spec = self._phase_table[phase]
 
-        if spec.on_enter is not None:  # Entry action
-            #spec.on_enter(self)
-            spec.on_enter()
-
         # start / stop timer
         if spec.timeout_ms is not None:
             self._timer.start(spec.timeout_ms + extra_ms)
         else:
             self._timer.stop()
 
+        # NOTE: this needs to come after timer start to be able to cancel it in the entry action if needed
+        if spec.on_enter is not None:  # Entry action
+            #spec.on_enter(self)
+            spec.on_enter()
+
     def _on_timeout(self):
         """Handle phase timeout."""
-        self._advance()
+        self._advance(timed_out=True)
 
-    def _advance(self):
+    def _advance(self, timed_out=False):
         """Evaluate routing rules and move to next phase if needed."""
         spec = self._phase_table[self._current_phase]
 
-        if spec.decide:
+        if spec.decide and not timed_out:
             key = spec.decide(self)
             target = spec.routes.get(key, spec.next_phase_default)
         else:
             target = spec.next_phase_default
 
-        if target and target != self._current_phase:
-            self._goto(target)
+        # if target and target != self._current_phase:
+        self._goto(target)
 
     # ##################################  PAYLOAD HANDLING  ##################################
 
@@ -318,6 +328,13 @@ class BaseExperimentManager(QtCore.QObject, metaclass=QABCMeta):
         self._out_word = word
         self.emit_payload_ready(self.actuator_pins_cfg.mask_from_word(word), flush)
 
+    def _deliver_reward(self):
+        # Reset all other outputs
+        self.set_outputs(on=['reward'], flatten=True, flush=True)
+        QtCore.QTimer.singleShot(self.reward_duration, self._stop_reward_delivery)
+
+    def _stop_reward_delivery(self):
+        self.set_outputs(flatten=True, flush=True)
     # ##################################  INPUT HANDLERS  ##################################
 
     @QtCore.Slot(int)
@@ -330,7 +347,8 @@ class BaseExperimentManager(QtCore.QObject, metaclass=QABCMeta):
         sensor_bits = [(state_value >> i) & 0x01
                        for i in range(len(self.sensors_pins_config.pin_names))]
         self.sensorsStateChanged.emit(sensor_bits)
-        self.log(logging.DEBUG, f'State value: {state_value:#04x} ({state_value:03d}), state bits: {sensor_bits}')
+        # TODO: parametrize logging level with config file
+        self.log(logging.INFO, f'State value: {state_value:#04x} ({state_value:03d}); state bits, {", ".join(str(bit) for bit in sensor_bits)}')
 
         changed_pins = {pin_name: bool(pin_on) for pin_name, pin_on in zip(self.sensors_pins_config.pin_names, sensor_bits)
                         if bool(pin_on) != self.sensors_pins_config._current_states[pin_name]}
@@ -353,7 +371,7 @@ class BaseExperimentManager(QtCore.QObject, metaclass=QABCMeta):
         if relevant_pins is None:  # If no relevant pins are defined, ignore all pin changes
             return
         elif relevant_pins is ANY_PIN:
-            self._dispatch_changed_pin(pin_name)
+            self._dispatch_changed_pin(pin_name, Edge.BOTH)
             self._advance()
             return
         elif pin_name not in relevant_pins.keys():  # some but not this one
@@ -362,21 +380,21 @@ class BaseExperimentManager(QtCore.QObject, metaclass=QABCMeta):
             edge = Edge.RISING if bit and not prev_state else Edge.FALLING if not bit and prev_state else None
             if edge is None:  # TODO: check when this happens
                 raise ValueError("Input change triggered with same pin state")
-                self._dispatch_changed_pin(pin_name)
+                self._dispatch_changed_pin(pin_name, None)
             else:
                 expected_edge = relevant_pins[pin_name]
                 # if expected edge can be both we don't need edge direction
                 if expected_edge in (edge, Edge.BOTH):
-                    self._dispatch_changed_pin(pin_name)
+                    self._dispatch_changed_pin(pin_name, edge)
                     self._advance()
                     return
                 else:
                     return
 
     # ############################ TEMPLATE METHODS ############################
-    def _dispatch_changed_pin(self, pin_name: str):
+    def _dispatch_changed_pin(self, pin_name: str, edge: Edge):
         """
-        Dispatch a changed pin event.
+        Dispatch a changed pin event along with the edge, i.e. the direction of the change.
         This method should be overridden in subclasses to handle specific pin changes.
         """
         raise NotImplementedError("Subclasses must implement this method.")
@@ -433,6 +451,8 @@ class BeatBoxExperimentManagerS1(BaseExperimentManager):
     retrieving pellets, and managing the experiment configuration.
 
     The skeleton of the state machine is defined in the _phase_table_initial and _phase_table attributes.
+
+    Pellet delivery and pellet arrival logic have been decoupled for clarity.
     """
     stage_number = 1
 
@@ -446,17 +466,41 @@ class BeatBoxExperimentManagerS1(BaseExperimentManager):
         self._phase_table = {
             Phase.ITI: PhaseSpec(
                 on_enter=self._phase_iti,
-                next_phase_default=Phase.WAIT_PELLET,
+                next_phase_default=Phase.DELIVER_PELLET,
                 timeout_ms=self.inter_trial_interval,
                 relevant_pins=None
             ),
 
+            Phase.DELIVER_PELLET: PhaseSpec(
+                on_enter=self._phase_deliver_pellet,
+                next_phase_default=Phase.WAIT_PELLET,
+                timeout_ms=0,
+                relevant_pins=None
+            ),
+
             Phase.WAIT_PELLET: PhaseSpec(
+                on_enter= self._phase_wait_pellet,
+                routes={True: Phase.WAIT_PELLET_RETRIEVAL},
+                next_phase_default=Phase.DELIVER_PELLET,
+                timeout_ms=1000,
+                decide=lambda instance: instance.pellet_delivered,
+                relevant_pins={'nose_poke': Edge.FALLING}
+            ),
+
+            Phase.WAIT_PELLET_RETRIEVAL: PhaseSpec(
                 on_enter=self._phase_wait_pellet_retrieval,
-                routes={True: Phase.ITI},  # go back to ITI
-                decide=lambda instance: instance.last_pellet_retrieved,
+                routes={'incomplete': Phase.ITI,
+                        'complete': Phase.DONE},  # go back to ITI
+                decide=lambda instance: instance.get_experiment_status(),
                 relevant_pins={'nose_poke': Edge.RISING}  # FIXME: set proper edge,
             ),
+
+            Phase.DONE: PhaseSpec(
+                on_enter=self._phase_done,
+                routes=None, # TODO: add routing to next experiment
+                decide= lambda instance: False,
+                relevant_pins=None
+            )
         }
 
     def _phase_iti(self):
@@ -464,6 +508,29 @@ class BeatBoxExperimentManagerS1(BaseExperimentManager):
         self.set_outputs(flatten=True, flush=True)  # Force defaults
         self.waiting_for_pellet_retrieval = False
         self.last_pellet_retrieved = False
+
+    def _phase_deliver_pellet(self):
+        # don't deliver a reward if somehow there's already something there
+        if not self.sensors_pins_config._current_states["nose_poke"]:
+            self._force_advance_to_wait_pellet()
+            return
+        self.waiting_for_pellet_delivery = True
+        self._deliver_reward() # also resets screen
+
+    # FIXME: this is ugly
+    def _phase_wait_pellet(self):
+        if not self.sensors_pins_config._current_states["nose_poke"]: # somehow there's already a pellet
+            self._force_advance_to_wait_pellet()
+            return
+
+    # FIXME: this is ugly, but needed to handle the case where there's already a pellet
+    def _force_advance_to_wait_pellet(self):
+        if self._current_phase is not Phase.DELIVER_PELLET and self._current_phase is not Phase.WAIT_PELLET:
+            return
+        # Note: if timeout is not cancelled, it will be called for a phase that does not have a default route and crash
+        if self._timer.isActive():
+            self._timer.stop() # No need to reset as timer.start(timeout_ms) will do it
+        self._goto(Phase.WAIT_PELLET_RETRIEVAL)
 
     def _phase_wait_pellet_retrieval(self):
         self.waiting_for_pellet_retrieval = True
@@ -476,6 +543,18 @@ class BeatBoxExperimentManagerS1(BaseExperimentManager):
 
         self.log(logging.DEBUG, f'Starting trial {self.n_pellets_retrieved + 1} of {self.n_trials}')
 
+    def _phase_done(self):
+        self.log(logging.INFO, f'S1 Experiment done.\n'
+                                f'Number of trials: {self.trial_no}, number of pellets retrieved: {self.n_pellets_retrieved}')
+        self.trial_no = 0
+
+    def handle_pellet_delivered(self):
+        if not self.waiting_for_pellet_delivery:
+            self.log(logging.WARNING, 'Pellet delivered, but not waiting for it.')
+            return
+        self.waiting_for_pellet_delivery = False
+        self.pellet_delivered = True
+
     # called from _dispatch_changed_pin -------------------------------
     def handle_pellet_retrieved(self):
         if not self.waiting_for_pellet_retrieval:
@@ -483,12 +562,31 @@ class BeatBoxExperimentManagerS1(BaseExperimentManager):
             return
         self.waiting_for_pellet_retrieval = False
         self.n_pellets_retrieved += 1
-        self.last_pellet_retrieved = True
+        self.last_pellet_retrieved = True # TODO: remove as it is not used anymore by decide
         self.pelletRetrieved.emit()
 
-    def _dispatch_changed_pin(self, pin_name: str):
-        if pin_name == 'nose_poke':  # REFACTOR: we could use e.g. a dataclass to avoid string mismatches
-            self.handle_pellet_retrieved()
+    def get_experiment_status(self):
+        if self.n_pellets_retrieved < self.n_trials:
+            return 'incomplete'
+        else:
+            dlg = QtWidgets.QMessageBox()
+            dlg.setText(  # FIXME: end experiment, see how we could instanciate the next stage
+                f"""All pellets have been retrieved.
+                The stage S{self.stage_number} experiment is now complete.
+                You can now move to S{self.stage_number + 1}."""
+            )
+            return 'complete'
+
+
+    def _dispatch_changed_pin(self, pin_name: str, edge: Edge = Edge.BOTH):
+        # REFACTOR: we could use e.g. a dataclass to avoid string mismatches
+        if pin_name == 'nose_poke':
+            if edge == Edge.RISING:
+                self.handle_pellet_retrieved()
+            elif edge == Edge.FALLING:
+                self.handle_pellet_delivered()
+            elif edge == Edge.BOTH:
+                return
 
     def set_experiment_folder(self, experiment_folder):
         self.experiment_folder = experiment_folder
@@ -521,26 +619,12 @@ class BeatBoxExperimentManagerS1(BaseExperimentManager):
         self.config.write()
 
     def handle_inter_trial_interval_changed(self, value):
+        if value is None:
+            return
         self.inter_trial_interval = value
         self.config['inter_trial_interval'] = value
         self.config.write()
-
-    @property
-    def n_pellets_retrieved(self):
-        return self._n_pellets_retrieved
-
-    @n_pellets_retrieved.setter
-    def n_pellets_retrieved(self, value):
-        if value < self.n_trials:
-            self._n_pellets_retrieved = value
-        else:
-            dlg = QtWidgets.QMessageBox()
-            dlg.setText(  # FIXME: end experiment, see how we could instanciate the next stage
-                f"""All pellets have been retrieved.
-                The stage S{self.stage_number} experiment is now complete.
-                You can now move to S{self.stage_number + 1}."""
-            )
-
+        self._phase_table[Phase.ITI].set_timeout(value) # FIXME: should this rather be done with a setter ?
 
 class BeatBoxExperimentManagerS2(BeatBoxExperimentManagerS1):
     """
@@ -649,9 +733,6 @@ class BeatBoxExperimentManagerS2(BeatBoxExperimentManagerS1):
         names = self.screen_pattern_names[self.get_screen_side()]
         self.set_outputs(on=names, flatten=False, flush=False)
 
-    def _deliver_reward(self):  # TODO: check if this shouldn't be in the base class
-        self.set_outputs(on=['reward'], flatten=True, flush=True)
-
     def _flash_error(self):
         self.set_outputs(on=['light'], flatten=False, flush=False)
         self.actuatorsStateChanged.emit(self._mask('light'))               # tell GUI to show
@@ -703,7 +784,7 @@ class BeatBoxExperimentManagerS2(BeatBoxExperimentManagerS1):
         is_correct = pin_name.startswith(self.get_screen_side())
         self.touch_result = ('correct' if is_correct else 'incorrect', pin_name)
 
-    def _dispatch_changed_pin(self, pin_name: str):
+    def _dispatch_changed_pin(self, pin_name: str, edge: Edge = Edge.BOTH):
         super()._dispatch_changed_pin(pin_name)  # call the base class method first
         match pin_name:
             case 'nose_poke':
@@ -723,24 +804,6 @@ class BeatBoxExperimentManagerS2(BeatBoxExperimentManagerS1):
         self._read_or_write_config('learning_threshold')
         if "timing" in self.config:
             self.error_flash_ms = self.config["timing"].get("error_flash_ms", self.error_flash_ms)
-
-    @property
-    def n_pellets_retrieved(self):
-        return self._n_pellets_retrieved
-
-    @n_pellets_retrieved.setter
-    def n_pellets_retrieved(self, value):
-        if value < self.n_trials:
-            self._n_pellets_retrieved = value
-        else:
-            dlg = QtWidgets.QMessageBox()
-            dlg.setText(  # TODO: change message for max reached in S2
-                f"""All pellets have been retrieved.
-                The stage S{self.stage_number} experiment is now complete.
-                You can now move to S{self.stage_number + 1}."""
-            )
-
-        self.check_performance()
 
     def check_performance(self):
         correct = len(self.responses['correct'])

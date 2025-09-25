@@ -18,7 +18,7 @@ def crc8(data: Union[str, bytes], polynomial: int = 0x07, init: int = 0) -> int:
                 crc = (crc << 1) & 0xFF
     return crc
 
-
+# TODO: refactor name as it does more than just config pins
 class PinConfig:
     """
     Load pins_config.cfg and expose
