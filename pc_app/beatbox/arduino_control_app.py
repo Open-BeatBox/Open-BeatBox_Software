@@ -124,6 +124,7 @@ class ArduinoControlApp(QtWidgets.QMainWindow):
         experiment_layout.addWidget(self.inter_trial_spinbox)
 
         self.experiment_state_btn = QtWidgets.QPushButton("Start Experiment")
+        self.experiment_state_btn.setEnabled(False)
         self.experiment_state_btn.clicked.connect(self.start_experiment)
         experiment_layout.addWidget(self.experiment_state_btn)
 
@@ -367,9 +368,13 @@ class ArduinoControlApp(QtWidgets.QMainWindow):
 
     def on_handshake(self):
         self.append_log('Handshake completed.', logging.INFO)
+        # Now we can start experiments
+        self.experiment_state_btn.setEnabled(True)
+        # Set screen to default state
+        self.experiment_manager.handshake_completed()
 
-    # TODO: add comments
     def send_set_command(self, checked_pins=None):
+        # TODO: add comments, e.g. why use a timer to send a command if it's a reward ?
         if not isinstance(checked_pins, (list, tuple)):
             checked_pins = None  # A status value was passed instead. Overwrite
         logger.debug(f'Sending set command with checked pins: {checked_pins}')

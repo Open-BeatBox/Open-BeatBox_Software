@@ -173,6 +173,10 @@ class BaseExperimentManager(QtCore.QObject, metaclass=QABCMeta):
         if auto_start:
             self.__post_init_phases()  # Start the state machine (manages the event sequence)
 
+    def handshake_completed(self):
+        # Set output to know state after handshake
+        self.emit_payload_ready(self.actuator_pins_cfg.default_mask(), flush=True)
+
     def start_experiment(self):
         self.start_state_machine()
 
