@@ -167,10 +167,11 @@ class BeatBoxExperimentManagerS1(BaseExperimentManager):
         self._read_or_write_config('n_trials')
         self._read_or_write_config('inter_trial_interval')
         # FIXME: should we send a signal to the main window to update the UI instead of setting it directly?
-        self.main_window.n_trials_spinbox.setValue(self.n_trials)
+        # First connect the handlers, then set the config values
         self.main_window.n_trials_spinbox.valueChanged.connect(self.handle_n_trials_changed)
-        self.main_window.inter_trial_spinbox.setValue(self.inter_trial_interval)
+        self.main_window.n_trials_spinbox.setValue(self.n_trials)
         self.main_window.inter_trial_spinbox.valueChanged.connect(self.handle_inter_trial_interval_changed)
+        self.main_window.inter_trial_spinbox.setValue(self.inter_trial_interval)
 
     def _mask(self, *names: str) -> list[int]:
         """
