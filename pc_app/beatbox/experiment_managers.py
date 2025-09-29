@@ -265,7 +265,7 @@ class BaseExperimentManager(QtCore.QObject, metaclass=QABCMeta):
 
         if spec.decide and not timed_out:
             key = spec.decide(self)
-            target = spec.routes.get(key, spec.next_phase_default)
+            target = spec.routes.get(key, spec.next_phase_default) # FIXME: crashes if next_phase_default is None
         else:
             target = spec.next_phase_default
 
@@ -302,10 +302,12 @@ class BaseExperimentManager(QtCore.QObject, metaclass=QABCMeta):
             payload.extend(rgb_values)
         self.emit_payload_ready(payload)
 
-    def set_outputs(self, on: List[str] = (), off: List[str] = (), flatten: bool = False, flush: bool = False) -> None:
+    def set_outputs(self, on: List[str] = (), off: List[str] = (), flatten: bool = False, flush: bool = False, default: bool = False) -> None:
         """
         Set the outputs specified in `on` to high and those in `off` to low.
         If `flatten` is True, all other outputs are set to low.
+        If `default` is True, all other outputs are set to their default value defined in config file.
+        If `default` and `flatten` both are True, then `default` is ignored.
 
         Parameters
         ----------
@@ -317,8 +319,10 @@ class BaseExperimentManager(QtCore.QObject, metaclass=QABCMeta):
             If True, all outputs not in `on` are set to low.
         flush : bool
             If True, the payload is sent immediately to the hardware.
+        default : bool
+            If True, the default pin configuration is taken as basis.
         """
-        word = self.actuator_pins_cfg.default_word() if flatten else self._out_word
+        word = 0 if flatten else self.actuator_pins_cfg.default_word() if default else self._out_word
         to_bit_idx = self.actuator_pins_cfg.bit_idx
         for name in on:
             word |= (1 << to_bit_idx(name))
@@ -335,6 +339,9 @@ class BaseExperimentManager(QtCore.QObject, metaclass=QABCMeta):
 
     def _stop_reward_delivery(self):
         self.set_outputs(flatten=True, flush=True)
+
+    def turn_off_screens(self):
+        self.set_outputs(on=['left_Black_pattern', 'right_Black_pattern'], flatten=True, flush=True)
     # ##################################  INPUT HANDLERS  ##################################
 
     @QtCore.Slot(int)

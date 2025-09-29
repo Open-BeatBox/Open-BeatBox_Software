@@ -59,7 +59,7 @@ class BeatBoxExperimentManagerS1(BaseExperimentManager):
                 routes={'incomplete': Phase.ITI,
                         'complete': Phase.DONE},  # go back to ITI
                 decide=lambda instance: instance.get_experiment_status(),
-                relevant_pins={'nose_poke': Edge.RISING}  # FIXME: set proper edge,
+                relevant_pins={'nose_poke': Edge.RISING}
             ),
 
             Phase.DONE: PhaseSpec(
@@ -71,8 +71,10 @@ class BeatBoxExperimentManagerS1(BaseExperimentManager):
         }
 
     def _phase_iti(self):
+        # TODO: check which one between defaults and screens off is more relevant
         # turn everything off
-        self.set_outputs(flatten=True, flush=True)  # Force defaults
+        # self.turn_off_screens()
+        self.set_outputs(default=True, flush=True) # Force defaults
         self.waiting_for_pellet_retrieval = False
         self.last_pellet_retrieved = False
 
