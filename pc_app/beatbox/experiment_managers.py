@@ -159,9 +159,8 @@ class BaseExperimentManager(QtCore.QObject, metaclass=QABCMeta):
         self.main_window = main_window
         self.waiting_for_pellet_delivery = False
         self.pellet_delivered = False
-        self.n_pellets_retrieved = 0
+        self.n_pellets_retrieved = 0 # also the current trial number
         self.waiting_for_pellet_retrieval = False  # whether the manager is waiting for a pellet to be retrieved
-        self.last_pellet_retrieved = False
         self.config = ConfigObj()  # will be set in set_experiment_folder()
         if experiment_folder:
             self.set_experiment_folder(experiment_folder)

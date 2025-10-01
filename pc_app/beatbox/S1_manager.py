@@ -76,7 +76,6 @@ class BeatBoxExperimentManagerS1(BaseExperimentManager):
         # self.turn_off_screens()
         self.set_outputs(default=True, flush=True) # Force defaults
         self.waiting_for_pellet_retrieval = False
-        self.last_pellet_retrieved = False
 
     def _phase_deliver_pellet(self):
         # don't deliver a reward if somehow there's already something there
@@ -104,7 +103,6 @@ class BeatBoxExperimentManagerS1(BaseExperimentManager):
     def _phase_wait_pellet_retrieval(self):
         self.waiting_for_pellet_retrieval = True
         self.trial_no += 1  #  TODO: check if here or part of handle_pellet_retrieved  # FIXME: part of pellet retrieval
-        self.last_pellet_retrieved = False
 
         payload = self.actuator_pins_cfg.mask()  # screens off
         self.emit_payload_ready(payload)
@@ -131,7 +129,6 @@ class BeatBoxExperimentManagerS1(BaseExperimentManager):
             return
         self.waiting_for_pellet_retrieval = False
         self.n_pellets_retrieved += 1
-        self.last_pellet_retrieved = True # TODO: remove as it is not used anymore by decide
         self.pelletRetrieved.emit()
 
     def get_experiment_status(self):
