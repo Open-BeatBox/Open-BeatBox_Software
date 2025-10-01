@@ -234,7 +234,7 @@ class BeatBoxExperimentManagerS2(BeatBoxExperimentManagerS1):
         self.performance.append(performance)
 
     def check_performance(self):
-        performance = self.performance[-1] if len(self.performance) > 0 else None
+        performance = self.performance[-1] if len(self.performance) > 0 else 0
         if performance is None: return False
         if performance >= self.learning_threshold and len(self.responses['correct']) >= self.n_trials:
             return True
@@ -254,7 +254,7 @@ class BeatBoxExperimentManagerS2(BeatBoxExperimentManagerS1):
             return 'incomplete'
 
     def log_experiment_data(self, full=False):
-        performance = self.performance[-1] if len(self.performance) > 0 else None
+        performance = self.performance[-1] if len(self.performance) > 0 else 0
 
         if full:
             self.log(logging.INFO,
