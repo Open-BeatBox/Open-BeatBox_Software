@@ -108,31 +108,63 @@ class ArduinoControlApp(QtWidgets.QMainWindow):
 
         ##########################   Experiment   #########################
 
-        # Experiment folder selection
         experiment_group = QtWidgets.QGroupBox("Experiment Setup")
-        experiment_layout = QtWidgets.QHBoxLayout(experiment_group)
+        experiment_layout = QtWidgets.QVBoxLayout(experiment_group)
+
+        ######### Overall experiment widgets
+        # Experiment folder selection
+        overall_group = QtWidgets.QGroupBox("Overall setup")
+        overall_experiment_layout = QtWidgets.QHBoxLayout(overall_group)
         self.experiment_button = QtWidgets.QPushButton("Select Folder")
         self.experiment_button.clicked.connect(self.select_experiment_folder)
-        experiment_layout.addWidget(self.experiment_button)
+        overall_experiment_layout.addWidget(self.experiment_button)
+
+        # Experiment stage selection
+        self.stage_combobox = QtWidgets.QComboBox()
+        self.stage_combobox.setMinimumWidth(100)
+        self.stage_combobox.addItems(['S1', 'S2', 'S3'])
+
 
         # Controls for n_trials and inter_trial_interval
         self.n_trials_spinbox = QtWidgets.QSpinBox()
         self.n_trials_spinbox.setRange(1, 9999)
         self.n_trials_spinbox.setValue(self.experiment_manager.n_trials)
-        experiment_layout.addWidget(QtWidgets.QLabel("n_trials:"))
-        experiment_layout.addWidget(self.n_trials_spinbox)
+        overall_experiment_layout.addWidget(QtWidgets.QLabel("n_trials:"))
+        overall_experiment_layout.addWidget(self.n_trials_spinbox)
 
         self.inter_trial_spinbox = QtWidgets.QSpinBox()
         self.inter_trial_spinbox.setRange(1, 999999)
         self.inter_trial_spinbox.setValue(self.experiment_manager.inter_trial_interval)
-        experiment_layout.addWidget(QtWidgets.QLabel("Inter trial (ms):"))
-        experiment_layout.addWidget(self.inter_trial_spinbox)
+        overall_experiment_layout.addWidget(QtWidgets.QLabel("Inter trial (ms):"))
+        overall_experiment_layout.addWidget(self.inter_trial_spinbox)
 
         self.experiment_state_btn = QtWidgets.QPushButton("Start Experiment")
         self.experiment_state_btn.setEnabled(False)
         self.experiment_state_btn.clicked.connect(self.start_experiment)
-        experiment_layout.addWidget(self.experiment_state_btn)
+        overall_experiment_layout.addWidget(self.experiment_state_btn)
 
+        ###### S2 experiment specific widgets
+        s2_experiment_group = QtWidgets.QGroupBox("S2 setup")
+        s2_layout = QtWidgets.QHBoxLayout(s2_experiment_group)
+
+        # Error flash duration
+        self.error_flash_spinbox = QtWidgets.QSpinBox()
+        self.error_flash_spinbox.setRange(1, 999999)
+        self.error_flash_spinbox.setValue(self.experiment_manager.error_flash_ms)
+        s2_layout.addWidget(QtWidgets.QLabel("Error Flash (ms):"))
+        s2_layout.addWidget(self.error_flash_spinbox)
+
+        # Learning threshold
+        self.learning_threshold_spinbox = QtWidgets.QDoubleSpinBox()
+        self.learning_threshold_spinbox.setRange(0, 1)
+        self.learning_threshold_spinbox.setSingleStep(0.01)
+        self.learning_threshold_spinbox.setDecimals(2)
+        self.learning_threshold_spinbox.setValue(self.experiment_manager.learning_threshold)
+        s2_layout.addWidget(QtWidgets.QLabel("Learning threshold:"))
+        s2_layout.addWidget(self.learning_threshold_spinbox)
+
+        experiment_layout.addWidget(overall_group)
+        experiment_layout.addWidget(s2_experiment_group)
         main_layout.addWidget(experiment_group)
 
         ####################################################################
