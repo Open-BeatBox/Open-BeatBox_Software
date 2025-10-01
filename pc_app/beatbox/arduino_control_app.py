@@ -19,7 +19,9 @@ from qtpy import QtWidgets, QtCore, QtGui
 import qdarkstyle
 
 from beatbox.bb_logging import qt_handler, logger
-from beatbox.experiment_managers import BeatBoxExperimentManagerS1, BeatBoxExperimentManagerS2
+from beatbox.S2_manager import BeatBoxExperimentManagerS2
+from beatbox.S1_manager import BeatBoxExperimentManagerS1
+
 from beatbox.qt_utils import LEDIndicator
 from beatbox.serial_com import get_platform_serial_ports, BeatBoxCommunicator, BeatBoxMessage, HandshakeWorker
 
@@ -44,7 +46,7 @@ class ArduinoControlApp(QtWidgets.QMainWindow):
         self.communicator.errorOccurred.connect(self.on_error)
 
         self.with_neopixels = with_neopixels
-        self.experiment_manager = BeatBoxExperimentManagerS1(experiment_folder, self.communicator,
+        self.experiment_manager = BeatBoxExperimentManagerS2(experiment_folder, self.communicator,
                                                              n_trials=n_trials,
                                                              inter_trial_interval=inter_trial_interval,
                                                              main_window=self)

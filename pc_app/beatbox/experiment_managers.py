@@ -333,15 +333,14 @@ class BaseExperimentManager(QtCore.QObject, metaclass=QABCMeta):
         self.emit_payload_ready(self.actuator_pins_cfg.mask_from_word(word), flush)
 
     def _deliver_reward(self):
-        # Reset all other outputs
-        self.set_outputs(on=['reward'], flatten=True, flush=True)
+        self.set_outputs(on=['reward'], flatten=False, flush=False)
         QtCore.QTimer.singleShot(self.reward_duration, self._stop_reward_delivery)
 
     def _stop_reward_delivery(self):
         self.set_outputs(flatten=True, flush=True)
 
     def turn_off_screens(self):
-        self.set_outputs(on=['left_Black_pattern', 'right_Black_pattern'], flatten=True, flush=True)
+        self.set_outputs(on=['left_Black_pattern', 'right_Black_pattern'], flatten=True, flush=False)
     # ##################################  INPUT HANDLERS  ##################################
 
     @QtCore.Slot(int)
