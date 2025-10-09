@@ -150,7 +150,8 @@ class ArduinoControlApp(QtWidgets.QMainWindow):
         # Error flash duration
         self.error_flash_spinbox = QtWidgets.QSpinBox()
         self.error_flash_spinbox.setRange(1, 999999)
-        self.error_flash_spinbox.setValue(self.experiment_manager.error_flash_ms)
+        self.error_flash_spinbox.setValue(
+            self.experiment_manager.s2_config.error_flash_ms)
         s2_layout.addWidget(QtWidgets.QLabel("Error Flash (ms):"))
         s2_layout.addWidget(self.error_flash_spinbox)
 
@@ -159,7 +160,8 @@ class ArduinoControlApp(QtWidgets.QMainWindow):
         self.learning_threshold_spinbox.setRange(0, 1)
         self.learning_threshold_spinbox.setSingleStep(0.01)
         self.learning_threshold_spinbox.setDecimals(2)
-        self.learning_threshold_spinbox.setValue(self.experiment_manager.learning_threshold)
+        self.learning_threshold_spinbox.setValue(
+            self.experiment_manager.s2_config.learning_threshold)
         s2_layout.addWidget(QtWidgets.QLabel("Learning threshold:"))
         s2_layout.addWidget(self.learning_threshold_spinbox)
 

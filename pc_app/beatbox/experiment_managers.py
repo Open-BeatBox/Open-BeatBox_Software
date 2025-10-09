@@ -23,11 +23,12 @@ from abc import ABCMeta
 from pathlib import Path
 from enum import Enum, auto
 from dataclasses import dataclass, field
-from typing import Callable, Any, Mapping, List, Final, Union, final
+from typing import Callable, Any, Mapping, List, Final, Union, final, Dict
 
 from configobj import ConfigObj
 from qtpy import QtCore, QtWidgets
 
+from beatbox.S2_manager import S2Config
 from beatbox.serial_com import BeatBoxCommunicator, SetPayloadOutputBus
 from beatbox.utils import PinConfig, load_pin_config
 
@@ -109,6 +110,39 @@ class PhaseSpec:
         self.timeout_ms = value
 
 
+# TODO: use a baseConfig class ?
+def _read_or_write_config(obj : Union[BaseExperimentManager,S2Config], key: str, attribute: str = '', config: Dict = None):
+    """
+    Read or write a configuration value for the experiment.
+
+    If no dictionary is given as a config, except and use a config attribute in the given object.
+    If the key exists in the config, set the attribute to its value.
+    If the key does not exist, set the config value to the attribute's value.
+
+    Parameters
+    ----------
+    key : str
+        The key in the configuration dictionary.
+    attribute : str
+        The attribute name to set or get the value from.
+        If not provided, it is assumed to be the same as the key.
+    config : Dict.
+        The configuration to read or write.
+        If not provided, use the instance class member.
+    """
+    if config is None:
+        if obj.config is not None:
+            config = obj.config
+        else:
+            raise ValueError(f'No configuration to write for {obj}')
+
+    if not attribute:
+        attribute = key
+    if val:= config.get(key):
+        setattr(obj, attribute, val)
+    else:
+        config[key] = getattr(obj, attribute)
+
 # Grab the actual Qt metaclass that PyQt uses
 QtMeta = type(QtCore.QObject)
 
@@ -161,6 +195,7 @@ class BaseExperimentManager(QtCore.QObject, metaclass=QABCMeta):
         self.pellet_delivered = False
         self.n_pellets_retrieved = 0 # also the current trial number
         self.waiting_for_pellet_retrieval = False  # whether the manager is waiting for a pellet to be retrieved
+        # the config Dictionary read from the config file
         self.config = ConfigObj()  # will be set in set_experiment_folder()
         if experiment_folder:
             self.set_experiment_folder(experiment_folder)
@@ -210,6 +245,9 @@ class BaseExperimentManager(QtCore.QObject, metaclass=QABCMeta):
 
         self.logger.addHandler(file_handler)
         self.logger.propagate = True
+
+    def _read_or_write_config(self, key: str, attribute: str = ''):
+        _read_or_write_config(self, key, attribute, config=self.config)
 
     def log(self, level, message):
         if self.logger:
@@ -420,25 +458,3 @@ class BaseExperimentManager(QtCore.QObject, metaclass=QABCMeta):
 
     def handle_n_trials_changed(self, value):...
     def handle_inter_trial_interval_changed(self, value): ...
-
-    def _read_or_write_config(self, key: str, attribute: str = ''):
-        """
-        Read or write a configuration value for the experiment.
-
-        If the key exists in the config, set the attribute to its value.
-        If the key does not exist, set the config value to the attribute's value.
-
-        Parameters
-        ----------
-        key : str
-            The key in the configuration dictionary.
-        attribute : str
-            The attribute name to set or get the value from.
-            If not provided, it is assumed to be the same as the key.
-        """
-        if not attribute:
-            attribute = key
-        if val:= self.config.get(key):
-            setattr(self, attribute, val)
-        else:
-            self.config[key] = getattr(self, attribute)
