@@ -50,12 +50,9 @@ class ArduinoControlApp(QtWidgets.QMainWindow):
 
         self.with_neopixels = with_neopixels
         self.experiment_manager = BeatBoxExperimentManagerS2(experiment_folder, self.communicator,
-                                                             n_trials=n_trials,
-                                                             inter_trial_interval=inter_trial_interval,
                                                              main_window=self)
 
-        self.experiment_manager.sensorsStateChanged.connect(self._paint_sensor_leds)
-        self.experiment_manager.actuatorsStateChanged.connect(self._paint_actuator_leds)
+        self.connect_signal_from_experiment_manager()
 
         # UI Elements
         self.port_combobox = QtWidgets.QComboBox()
@@ -79,6 +76,7 @@ class ArduinoControlApp(QtWidgets.QMainWindow):
 
         self.setWindowTitle('Beatbox Controller')
         self.setup_ui()
+        self.experiment_manager.link_widgets()
 
         # Connect global log signals to our UI append function.
         qt_handler.logSignal.connect(self.append_log)
@@ -87,6 +85,13 @@ class ArduinoControlApp(QtWidgets.QMainWindow):
         self._handshake_worker = HandshakeWorker(self.communicator)
 
         self._connect_progress = None
+
+    def connect_signal_from_experiment_manager(self):
+        self.experiment_manager.sensorsStateChanged.connect(self._paint_sensor_leds)
+        self.experiment_manager.actuatorsStateChanged.connect(self._paint_actuator_leds)
+        if self.experiment_manager.stage_number >= 2:
+            self.experiment_manager.performanceUpdated.connect(self._update_performance)
+            self.experiment_manager.correctiveLoopUpdated.connect(self._update_corrective_loop)
 
     def setup_ui(self):
         central_widget = QtWidgets.QWidget()
@@ -128,13 +133,13 @@ class ArduinoControlApp(QtWidgets.QMainWindow):
         # Controls for n_trials and inter_trial_interval
         self.n_trials_spinbox = QtWidgets.QSpinBox()
         self.n_trials_spinbox.setRange(1, 9999)
-        self.n_trials_spinbox.setValue(self.experiment_manager.n_trials)
+        self.n_trials_spinbox.setValue(self.experiment_manager.config.n_trials)
         overall_experiment_layout.addWidget(QtWidgets.QLabel("n_trials:"))
         overall_experiment_layout.addWidget(self.n_trials_spinbox)
 
         self.inter_trial_spinbox = QtWidgets.QSpinBox()
         self.inter_trial_spinbox.setRange(1, 999999)
-        self.inter_trial_spinbox.setValue(self.experiment_manager.inter_trial_interval)
+        self.inter_trial_spinbox.setValue(self.experiment_manager.config.inter_trial_interval)
         overall_experiment_layout.addWidget(QtWidgets.QLabel("Inter trial (ms):"))
         overall_experiment_layout.addWidget(self.inter_trial_spinbox)
 
@@ -151,7 +156,7 @@ class ArduinoControlApp(QtWidgets.QMainWindow):
         self.error_flash_spinbox = QtWidgets.QSpinBox()
         self.error_flash_spinbox.setRange(1, 999999)
         self.error_flash_spinbox.setValue(
-            self.experiment_manager.s2_config.error_flash_ms)
+            self.experiment_manager.config.error_flash_ms)
         s2_layout.addWidget(QtWidgets.QLabel("Error Flash (ms):"))
         s2_layout.addWidget(self.error_flash_spinbox)
 
@@ -161,12 +166,32 @@ class ArduinoControlApp(QtWidgets.QMainWindow):
         self.learning_threshold_spinbox.setSingleStep(0.01)
         self.learning_threshold_spinbox.setDecimals(2)
         self.learning_threshold_spinbox.setValue(
-            self.experiment_manager.s2_config.learning_threshold)
+            self.experiment_manager.config.learning_threshold)
         s2_layout.addWidget(QtWidgets.QLabel("Learning threshold:"))
         s2_layout.addWidget(self.learning_threshold_spinbox)
 
+        # Experiment Data group
+        experiment_data_group = QtWidgets.QGroupBox("Experiment Data")
+        experiment_data_layout = QtWidgets.QHBoxLayout(experiment_data_group)
+
+        left_label = QtWidgets.QLabel("Left performance:")
+        self.left_value_label = QtWidgets.QLabel(f"{0:.2f}")
+        experiment_data_layout.addWidget(left_label)
+        experiment_data_layout.addWidget(self.left_value_label)
+
+        right_label = QtWidgets.QLabel("Right performance:")
+        self.right_value_label = QtWidgets.QLabel(f"{0:.2f}")
+        experiment_data_layout.addWidget(right_label)
+        experiment_data_layout.addWidget(self.right_value_label)
+
+        corrective_loop_label = QtWidgets.QLabel("Corrective loop count:")
+        self.corrective_loop_label = QtWidgets.QLabel("0")
+        experiment_data_layout.addWidget(corrective_loop_label)
+        experiment_data_layout.addWidget(self.corrective_loop_label)
+
         experiment_layout.addWidget(overall_group)
         experiment_layout.addWidget(s2_experiment_group)
+        experiment_layout.addWidget(experiment_data_group)
         main_layout.addWidget(experiment_group)
 
         ####################################################################
@@ -443,6 +468,13 @@ class ArduinoControlApp(QtWidgets.QMainWindow):
         word = (payload[0] << 8) | payload[1]
         for idx, pin_name in enumerate(self.actuators_indicators):
             self.actuators_indicators[pin_name].set_state(bool((word >> idx) & 1))
+
+    def _update_performance(self, left_performance: float, right_performance: float):
+        self.left_value_label.setText(f"{left_performance:.2f}")
+        self.right_value_label.setText(f"{right_performance:.2f}")
+
+    def _update_corrective_loop(self, corrective_count: int):
+        self.corrective_loop_label.setText(str(corrective_count))
 
     def on_error(self, msg: BeatBoxMessage | str):
         err = msg.payload if isinstance(msg, BeatBoxMessage) else msg

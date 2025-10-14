@@ -23,17 +23,77 @@ from abc import ABCMeta
 from pathlib import Path
 from enum import Enum, auto
 from dataclasses import dataclass, field
-from typing import Callable, Any, Mapping, List, Final, Union, final, Dict
+from typing import Callable, Any, Mapping, List, Final, Union, final, Dict, Optional
 
 from configobj import ConfigObj
+from configobj.validate import Validator
 from qtpy import QtCore, QtWidgets
 
-from beatbox.S2_manager import S2Config
 from beatbox.serial_com import BeatBoxCommunicator, SetPayloadOutputBus
 from beatbox.utils import PinConfig, load_pin_config
-
+from beatbox.validators import list_w_choice
 
 ANY_PIN: Final = object()
+
+class SConfig:
+    s_level: str = 'S0'
+
+    def __init__(self, folder=Path(__file__).parent):
+        self.folder = folder
+        self.attributes: List[str] = self._collect_attributes()
+        self._config: Optional[ConfigObj] = None
+        self.validator = Validator(functions={'list_w_choice': list_w_choice})
+
+    def _collect_attributes(self) -> List[str]:
+        all_annotations = {}
+        subclass_annotations = {}
+
+        for cls in reversed(self.__class__.__mro__):
+            annotations = getattr(cls, '__annotations__', {})
+            all_annotations.update(annotations)
+            if cls is self.__class__:
+                subclass_annotations = annotations  # the most specific subclass
+
+        return list(subclass_annotations.keys())
+
+    def load(self):
+        self._config = ConfigObj(str(self.cfg_path), encoding='utf-8',  # WARNING: defaults in spec !!
+                                 configspec=str(self._spec_path), unrepr=True)
+
+        self._validate()
+
+        for attr in self.attributes:
+            # Set specific stage attributes
+            if self.s_level in self._config and attr in self._config[self.s_level]:
+                setattr(self, attr, self._config[self.s_level][attr])
+
+            # if not redefined in the spec, look for global value
+            elif attr in self._config:
+                setattr(self, attr, self._config[attr])
+
+    def _validate(self):
+        # Validate the config
+        results = self._config.validate(self.validator, preserve_errors=True, copy=True)
+        errors = []
+        if results is not True:
+            errors = {key: value for key, value in results.items() if value is not True}
+            raise ValueError(f"Config validation failed. {errors}")
+
+    @property
+    def cfg_path(self) -> Path:
+        return Path(self.folder) / 'config' / 'experiment.cfg'
+
+    @property
+    def _spec_path(self) -> Path:
+        # return Path('~/.beatbox').expanduser() / 'config_specs' / f'{self.s_level}.config.spec'
+        return Path(__file__).parent / 'config_specs' / f'{self.s_level}.config.spec'
+
+    def write(self):
+        self._config.write()
+
+    def set(self, attribute, value):
+        setattr(self, attribute, value)
+
 
 class Edge(Enum):
     RISING  = 'rising'
@@ -109,40 +169,6 @@ class PhaseSpec:
             return
         self.timeout_ms = value
 
-
-# TODO: use a baseConfig class ?
-def _read_or_write_config(obj : Union[BaseExperimentManager,S2Config], key: str, attribute: str = '', config: Dict = None):
-    """
-    Read or write a configuration value for the experiment.
-
-    If no dictionary is given as a config, except and use a config attribute in the given object.
-    If the key exists in the config, set the attribute to its value.
-    If the key does not exist, set the config value to the attribute's value.
-
-    Parameters
-    ----------
-    key : str
-        The key in the configuration dictionary.
-    attribute : str
-        The attribute name to set or get the value from.
-        If not provided, it is assumed to be the same as the key.
-    config : Dict.
-        The configuration to read or write.
-        If not provided, use the instance class member.
-    """
-    if config is None:
-        if obj.config is not None:
-            config = obj.config
-        else:
-            raise ValueError(f'No configuration to write for {obj}')
-
-    if not attribute:
-        attribute = key
-    if val:= config.get(key):
-        setattr(obj, attribute, val)
-    else:
-        config[key] = getattr(obj, attribute)
-
 # Grab the actual Qt metaclass that PyQt uses
 QtMeta = type(QtCore.QObject)
 
@@ -172,7 +198,6 @@ class BaseExperimentManager(QtCore.QObject, metaclass=QABCMeta):
 
 
     def __init__(self, experiment_folder: str | Path, communicator: BeatBoxCommunicator,
-                 n_trials: int = 20, inter_trial_interval: int = 10000,
                  main_window: QtWidgets.QMainWindow = None,
                  actuator_pins_cfg: PinConfig = None,
                  auto_start: bool = False):
@@ -187,8 +212,6 @@ class BaseExperimentManager(QtCore.QObject, metaclass=QABCMeta):
         self._out_word = self.actuator_pins_cfg.default_word()
 
         self.experiment_folder = experiment_folder
-        self.n_trials = n_trials
-        self.inter_trial_interval = inter_trial_interval
         self.reward_duration = 150  # time reward pin stays high in ms  # TODO: parametrize
         self.main_window = main_window
         self.waiting_for_pellet_delivery = False
@@ -196,7 +219,7 @@ class BaseExperimentManager(QtCore.QObject, metaclass=QABCMeta):
         self.n_pellets_retrieved = 0 # also the current trial number
         self.waiting_for_pellet_retrieval = False  # whether the manager is waiting for a pellet to be retrieved
         # the config Dictionary read from the config file
-        self.config = ConfigObj()  # will be set in set_experiment_folder()
+        self.config = SConfig()  # will be set in set_experiment_folder()
         if experiment_folder:
             self.set_experiment_folder(experiment_folder)
 
@@ -246,9 +269,6 @@ class BaseExperimentManager(QtCore.QObject, metaclass=QABCMeta):
         self.logger.addHandler(file_handler)
         self.logger.propagate = True
 
-    def _read_or_write_config(self, key: str, attribute: str = ''):
-        _read_or_write_config(self, key, attribute, config=self.config)
-
     def log(self, level, message):
         if self.logger:
             self.logger.log(level, message)
@@ -263,7 +283,7 @@ class BaseExperimentManager(QtCore.QObject, metaclass=QABCMeta):
                           "Please define it in the subclass to start the state machine.")
 
     def start_state_machine(self):
-        # IMPROVEMENT: differentiate starting the state machine experiment initialization
+        # IMPROVEMENT: differentiate starting the state machine and experiment initialization
         if not self._phase_table:
             raise ValueError("Phase table is not defined.")
         for phase, spec in self._phase_table.items():
@@ -434,18 +454,21 @@ class BaseExperimentManager(QtCore.QObject, metaclass=QABCMeta):
                 else:
                     return
 
+    def set_experiment_folder(self, experiment_folder):
+        """
+        Set the experiment folder for logging and load the configuration.
+        This method should be overridden in subclasses to handle specific configurations.
+        """
+
+        self.experiment_folder = experiment_folder
+        Path(experiment_folder).mkdir(parents=True, exist_ok=True)
+        Path(experiment_folder).joinpath('config').mkdir(parents=True, exist_ok=True)
+
     # ############################ TEMPLATE METHODS ############################
     def _dispatch_changed_pin(self, pin_name: str, edge: Edge):
         """
         Dispatch a changed pin event along with the edge, i.e. the direction of the change.
         This method should be overridden in subclasses to handle specific pin changes.
-        """
-        raise NotImplementedError("Subclasses must implement this method.")
-
-    def set_experiment_folder(self, experiment_folder):
-        """
-        Set the experiment folder and load the configuration.
-        This method should be overridden in subclasses to handle specific configurations.
         """
         raise NotImplementedError("Subclasses must implement this method.")
 

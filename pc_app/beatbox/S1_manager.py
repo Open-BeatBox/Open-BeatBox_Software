@@ -2,13 +2,19 @@ from __future__ import annotations
 
 import logging
 from pathlib import Path
+from typing import List
 
 from configobj import ConfigObj
 from qtpy import QtWidgets
 
-from beatbox.experiment_managers import BaseExperimentManager, Phase, PhaseSpec, Edge
+from beatbox.experiment_managers import BaseExperimentManager, Phase, PhaseSpec, Edge, SConfig
 from beatbox.utils import PinConfig
 
+class S1Config(SConfig):
+    s_level = 'S1'
+
+    n_trials: int
+    inter_trial_interval: int
 
 class BeatBoxExperimentManagerS1(BaseExperimentManager):
     """
@@ -23,10 +29,11 @@ class BeatBoxExperimentManagerS1(BaseExperimentManager):
     """
     stage_number = 1
 
-    def __init__(self, experiment_folder, communicator, n_trials=20, inter_trial_interval=10000,
+    def __init__(self, experiment_folder, communicator,
                  main_window=None, actuator_pins_cfg: PinConfig = None):
-        super().__init__(experiment_folder, communicator, n_trials, inter_trial_interval, main_window, actuator_pins_cfg)
-
+        super().__init__(experiment_folder, communicator, main_window, actuator_pins_cfg)
+        self.config = S1Config(Path(__file__).parent)
+        self.config.load()
 
         # ----------------- phase table -----------------------------------
         self._phase_table_initial = Phase.ITI
@@ -34,7 +41,7 @@ class BeatBoxExperimentManagerS1(BaseExperimentManager):
             Phase.ITI: PhaseSpec(
                 on_enter=self._phase_iti,
                 next_phase_default=Phase.DELIVER_PELLET,
-                timeout_ms=self.inter_trial_interval,
+                timeout_ms=self.config.inter_trial_interval,
                 relevant_pins=None
             ),
 
@@ -108,7 +115,7 @@ class BeatBoxExperimentManagerS1(BaseExperimentManager):
         self.emit_payload_ready(payload)
         self.trialStarted.emit(self.trial_no)
 
-        self.log(logging.DEBUG, f'Starting trial {self.n_pellets_retrieved + 1} of {self.n_trials}')
+        self.log(logging.DEBUG, f'Starting trial {self.n_pellets_retrieved + 1} of {self.config.n_trials}')
 
     def _phase_done(self):
         self.log(logging.INFO, f'S1 Experiment done.\n'
@@ -132,14 +139,14 @@ class BeatBoxExperimentManagerS1(BaseExperimentManager):
         self.pelletRetrieved.emit()
 
     def get_experiment_status(self):
-        if self.n_pellets_retrieved < self.n_trials:
+        if self.n_pellets_retrieved < self.config.n_trials:
             return 'incomplete'
         else:
             dlg = QtWidgets.QMessageBox()
             dlg.setText(  # FIXME: end experiment, see how we could instanciate the next stage
                 f"""All pellets have been retrieved.
-                The stage S{self.stage_number} experiment is now complete.
-                You can now move to S{self.stage_number + 1}."""
+                The stage {self.config.s_level} experiment is now complete.
+                You can now move to next stage."""
             )
             return 'complete'
 
@@ -157,20 +164,14 @@ class BeatBoxExperimentManagerS1(BaseExperimentManager):
     def set_experiment_folder(self, experiment_folder):
         self.experiment_folder = experiment_folder
         Path(experiment_folder).mkdir(parents=True, exist_ok=True)
-        config_file_path = Path(experiment_folder) / 'config.cfg'
-        self.config = ConfigObj(str(config_file_path), encoding='utf-8', unrepr=True)
-        self.parse_experiment_config()
         self._setup_file_logging()
 
-    def parse_experiment_config(self):
-        self._read_or_write_config('n_trials')
-        self._read_or_write_config('inter_trial_interval')
-        # FIXME: should we send a signal to the main window to update the UI instead of setting it directly?
-        # First connect the handlers, then set the config values
+    # attach callbacks to stage specific widgets
+    def link_widgets(self):
+        if self.main_window is None:
+            return
         self.main_window.n_trials_spinbox.valueChanged.connect(self.handle_n_trials_changed)
-        self.main_window.n_trials_spinbox.setValue(self.n_trials)
         self.main_window.inter_trial_spinbox.valueChanged.connect(self.handle_inter_trial_interval_changed)
-        self.main_window.inter_trial_spinbox.setValue(self.inter_trial_interval)
 
     def _mask(self, *names: str) -> list[int]:
         """
@@ -181,14 +182,14 @@ class BeatBoxExperimentManagerS1(BaseExperimentManager):
         return self.actuator_pins_cfg.mask(*names)
 
     def handle_n_trials_changed(self, value):
-        self.n_trials = value
-        self.config['n_trials'] = value
+        self.config.n_trials = value
+        self.config.set('n_trials', value)
         self.config.write()
 
     def handle_inter_trial_interval_changed(self, value):
         if value is None:
             return
-        self.inter_trial_interval = value
-        self.config['inter_trial_interval'] = value
+        self.config.inter_trial_interval = value
+        self.config.set('inter_trial_interval', value)
         self.config.write()
-        self._phase_table[Phase.ITI].set_timeout(value) # FIXME: should this rather be done with a setter ?
+        self._phase_table[Phase.ITI].set_timeout(value)
