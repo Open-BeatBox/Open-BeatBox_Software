@@ -20,6 +20,7 @@ from __future__ import annotations
 import warnings
 import logging
 from abc import ABCMeta
+from datetime import datetime
 from pathlib import Path
 from enum import Enum, auto
 from dataclasses import dataclass, field
@@ -256,7 +257,9 @@ class BaseExperimentManager(QtCore.QObject, metaclass=QABCMeta):
 
     def _setup_file_logging(self):
         log_dir = Path(self.experiment_folder)
-        log_path = log_dir / 'experiment_status.csv'
+        timestamp = datetime.now().strftime("%d%m%y_%H%M%S")
+        log_filename = f"S{self.stage_number}_{timestamp}.csv"
+        log_path = log_dir / log_filename
 
         self.logger = logging.getLogger(f'ExperimentManagerS{self.stage_number}')
         self.logger.setLevel(logging.INFO)

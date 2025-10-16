@@ -92,6 +92,7 @@ class ArduinoControlApp(QtWidgets.QMainWindow):
         if self.experiment_manager.stage_number >= 2:
             self.experiment_manager.performanceUpdated.connect(self._update_performance)
             self.experiment_manager.correctiveLoopUpdated.connect(self._update_corrective_loop)
+            self.experiment_manager.trialNumbersUpdated.connect(self._update_trial_numbers)
 
     def setup_ui(self):
         central_widget = QtWidgets.QWidget()
@@ -172,22 +173,40 @@ class ArduinoControlApp(QtWidgets.QMainWindow):
 
         # Experiment Data group
         experiment_data_group = QtWidgets.QGroupBox("Experiment Data")
-        experiment_data_layout = QtWidgets.QHBoxLayout(experiment_data_group)
+        experiment_data_layout = QtWidgets.QVBoxLayout(experiment_data_group)
 
+        # Performance row
+        performance_layout = QtWidgets.QHBoxLayout()
         left_label = QtWidgets.QLabel("Left performance:")
         self.left_value_label = QtWidgets.QLabel(f"{0:.2f}")
-        experiment_data_layout.addWidget(left_label)
-        experiment_data_layout.addWidget(self.left_value_label)
-
+        self.left_value_label.setTextInteractionFlags(QtCore.Qt.TextSelectableByMouse)
+        performance_layout.addWidget(left_label)
+        performance_layout.addWidget(self.left_value_label)
         right_label = QtWidgets.QLabel("Right performance:")
         self.right_value_label = QtWidgets.QLabel(f"{0:.2f}")
-        experiment_data_layout.addWidget(right_label)
-        experiment_data_layout.addWidget(self.right_value_label)
+        self.right_value_label.setTextInteractionFlags(QtCore.Qt.TextSelectableByMouse)
+        performance_layout.addWidget(right_label)
+        performance_layout.addWidget(self.right_value_label)
+        experiment_data_layout.addLayout(performance_layout)
 
+        # Trial info row
+        trial_info_layout = QtWidgets.QHBoxLayout()
+        total_trials_label = QtWidgets.QLabel("Total trials:")
+        self.total_trials_value_label = QtWidgets.QLabel("0")
+        self.total_trials_value_label.setTextInteractionFlags(QtCore.Qt.TextSelectableByMouse)
+        trial_info_layout.addWidget(total_trials_label)
+        trial_info_layout.addWidget(self.total_trials_value_label)
+        current_trial_label = QtWidgets.QLabel("Current trial number:")
+        self.current_trial_value_label = QtWidgets.QLabel("0")
+        self.current_trial_value_label.setTextInteractionFlags(QtCore.Qt.TextSelectableByMouse)
+        trial_info_layout.addWidget(current_trial_label)
+        trial_info_layout.addWidget(self.current_trial_value_label)
         corrective_loop_label = QtWidgets.QLabel("Corrective loop count:")
-        self.corrective_loop_label = QtWidgets.QLabel("0")
-        experiment_data_layout.addWidget(corrective_loop_label)
-        experiment_data_layout.addWidget(self.corrective_loop_label)
+        self.corrective_loop_value_label = QtWidgets.QLabel("0")
+        self.corrective_loop_value_label.setTextInteractionFlags(QtCore.Qt.TextSelectableByMouse)
+        trial_info_layout.addWidget(corrective_loop_label)
+        trial_info_layout.addWidget(self.corrective_loop_value_label)
+        experiment_data_layout.addLayout(trial_info_layout)
 
         experiment_layout.addWidget(overall_group)
         experiment_layout.addWidget(s2_experiment_group)
@@ -474,7 +493,11 @@ class ArduinoControlApp(QtWidgets.QMainWindow):
         self.right_value_label.setText(f"{right_performance:.2f}")
 
     def _update_corrective_loop(self, corrective_count: int):
-        self.corrective_loop_label.setText(str(corrective_count))
+        self.corrective_loop_value_label.setText(str(corrective_count))
+
+    def _update_trial_numbers(self, current_trial_number: int, total_trials: int):
+        self.current_trial_value_label.setText(str(current_trial_number))
+        self.total_trials_value_label.setText(str(total_trials))
 
     def on_error(self, msg: BeatBoxMessage | str):
         err = msg.payload if isinstance(msg, BeatBoxMessage) else msg

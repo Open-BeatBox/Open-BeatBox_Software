@@ -42,32 +42,27 @@ class BeatBoxExperimentManagerS2(BeatBoxExperimentManagerS1):
 
     performanceUpdated = QtCore.Signal(float, float)
     correctiveLoopUpdated = QtCore.Signal(int)
+    trialNumbersUpdated = QtCore.Signal(int, int)
 
     def __init__(self, experiment_folder, communicator,
                  main_window=None, actuator_pins_cfg: PinConfig=None):
         super().__init__(experiment_folder, communicator, main_window, actuator_pins_cfg)
-        self.responses = {'correct': [], 'incorrect': []} # TODO: split by screen
+        # NOTE: Trials are categorized as left or right based on the correct side for that trial
+        self.current_trial_responses = {'correct': [], 'incorrect': []}  # Each entry: (response_type, trial_type, side, pin_name)
+        self.previous_trials_responses = {'correct': [], 'incorrect': []}  # Accumulated responses
         self.left_performance = []
         self.right_performance = []
-        self.tunnel_entered = False  # whether the tunnel has been entered
-        self.touch_result = None  # 'correct', 'incorrect', or None
-        self.reward_ms = 20000   # FIXME: random, TODO: parametrize
-        # self.s2_config = S2Config()
+        self.tunnel_entered = False
+        self._touch_result = None
         self.config = S2Config(Path(__file__).parent)
         self.config.load()
-        # Exactly alternating sides for the screens
-        # self.screen_sides = ['right' if i % 2 else 'left' for i in range(1, n_trials + 1)]
+        # FIXME: should not be here, this is the adapter between pins_config and the experiment configspec
         self.screen_pattern_suffixes = {
             'w': "_White_pattern",
             'b': "_Black_pattern",
             'v': "_V_lines_pattern",
             'h': "_H_lines_pattern",
         }
-        self.screen_pattern = {
-            'l': [self._derive_pattern_name('l', self.config.correct_pattern), 'right_Black_pattern'],
-            'r': ['left_Black_pattern', self._derive_pattern_name('r', self.config.correct_pattern)]
-        }
-
         self._phase_table_initial = Phase.ITI
         self._phase_table = {
             Phase.ITI: PhaseSpec(
@@ -80,7 +75,7 @@ class BeatBoxExperimentManagerS2(BeatBoxExperimentManagerS1):
                 on_enter=self._phase_wait_tunnel,
                 routes={True: Phase.SHOW_STIM},
                 decide=lambda instance: instance.tunnel_entered,  # bool attr set by handle_tunnel_crossing_in()
-                relevant_pins={'left_tunnel_crossing': Edge.FALLING}
+                relevant_pins={'right_tunnel_crossing': Edge.FALLING}
             ),
             Phase.SHOW_STIM: PhaseSpec(
                 on_enter=self._phase_show_stim,
@@ -91,7 +86,7 @@ class BeatBoxExperimentManagerS2(BeatBoxExperimentManagerS1):
             Phase.WAIT_TOUCH: PhaseSpec(
                 routes={'correct': Phase.CORRECT_RESPONSE,
                         'incorrect': Phase.INCORRECT_RESPONSE},
-                decide=lambda instance: instance.get_touch_valence(),  # 'correct'/'incorrect'/None
+                decide=lambda instance: instance._get_touch_valence(),  # 'correct'/'incorrect'/None
                 relevant_pins= {'left_response': Edge.RISING,
                                 'right_response': Edge.RISING}
             ),
@@ -131,7 +126,7 @@ class BeatBoxExperimentManagerS2(BeatBoxExperimentManagerS1):
                 relevant_pins={'nose_poke': Edge.RISING}
             ),
             Phase.STOP_FLASH: PhaseSpec(
-                on_enter=self.stop_flash,
+                on_enter=self._stop_flash,
                 next_phase_default=Phase.ITI,
                 timeout_ms=self.config.corrective_loop_timeout,
                 relevant_pins=None
@@ -154,7 +149,7 @@ class BeatBoxExperimentManagerS2(BeatBoxExperimentManagerS1):
             case _:
                 raise ValueError(f'Could not derive pattern name for side {side}') # supposedly never executed
 
-    def get_pattern_from_side(self, side : str):
+    def _get_pattern_from_side(self, side : str):
         if self.config.advanced:
             if side == 'l':
                 left_seq = self.config.left_screen_sequence
@@ -172,15 +167,15 @@ class BeatBoxExperimentManagerS2(BeatBoxExperimentManagerS1):
             else:
                 return self.config.incorrect_pattern
 
-    def get_current_pattern_name(self, side : str):
+    def _get_current_pattern_name(self, side : str):
         if side not in ('l', 'r'):
             raise ValueError('Side name must be "l" or "r"')
 
-        pattern = self.get_pattern_from_side(side)
+        pattern = self._get_pattern_from_side(side)
         return self._derive_pattern_name(side, pattern)
 
-    def get_touch_valence(self):
-        return self.touch_result[0] if self.touch_result is not None else None
+    def _get_touch_valence(self):
+        return self._touch_result[0] if self._touch_result is not None else None
 
     def _phase_iti(self):
         super()._phase_iti()
@@ -191,17 +186,8 @@ class BeatBoxExperimentManagerS2(BeatBoxExperimentManagerS1):
         self.tunnel_entered = False
 
     def _phase_show_stim(self):
-        self.touch_result = None
-        names = [self.get_current_pattern_name('l'), self.get_current_pattern_name('r')]
-        # if self.s2_config.advanced:
-        #     left_seq = self.s2_config.left_screen_sequence
-        #     right_seq = self.s2_config.right_screen_sequence
-        #     patterns = { 'left': left_seq[self.trial_no % len(left_seq)], 'right': right_seq[self.trial_no % len(right_seq)]}
-        #     names = [self._derive_pattern_name('l', patterns['left']),self._derive_pattern_name('r', patterns['right'])]
-        # else:
-        #     screen_seq = self.s2_config.screen_sequence
-        #     names = self.screen_pattern[screen_seq[self.trial_no % len(screen_seq)]]
-        # # names = self.screen_pattern_names[self.get_screen_side()]
+        self._touch_result = None
+        names = [self._get_current_pattern_name('l'), self._get_current_pattern_name('r')]
         self.set_outputs(on=names, flatten=True, flush=True)
 
     def _phase_done(self):
@@ -219,62 +205,70 @@ class BeatBoxExperimentManagerS2(BeatBoxExperimentManagerS1):
                              'right_White_pattern',
                              'right_Black_pattern'))               # tell GUI to show
 
-    def stop_flash(self):
+    def _stop_flash(self):
         self.set_outputs(off=['left_White_pattern','right_White_pattern'],
                          flatten=False, flush=False)
         self.actuatorsStateChanged.emit(self._mask())  # tell GUI to show  # TODO: check
 
     def _handle_screen_touch(self):
-        response_type,  pin_name = self.touch_result
-        self.touch_result = None  # reset touch result
-        self.responses[response_type].append(pin_name)
-        self.compute_performance() # update performance
-        self.correctiveLoopUpdated.emit(len(self.responses['incorrect']))
-        # Log the response
-
-        log_levels = {
-            'correct': logging.INFO,
-            'incorrect': logging.INFO
-        }
+        response_type, pin_name = self._touch_result
+        self._touch_result = None
+        response_side = 'l' if pin_name.startswith('left_') else 'r'
+        if response_type == 'correct':
+            side = response_side
+        else: # incorrect response, the "trial side" is the opposite of the response side
+            side = 'l' if response_side == 'r' else 'r'
+        # Register response given the correct side for this trial
+        trial_type = 'trial' if not self.current_trial_responses['correct'] and not self.current_trial_responses['incorrect'] else 'corrective_loop'
+        self.current_trial_responses[response_type].append((response_type, trial_type, side, pin_name))
+        log_levels = {'correct': logging.INFO, 'incorrect': logging.INFO}
         self.log(log_levels[response_type], f"{response_type.title()} response on {pin_name}.")
 
     def _handle_correct_response(self):
         """Turn screens off, drop pellet, wait ITI, start next trial."""
         self._handle_screen_touch()
         self.turn_off_screens()
+        # Merge current_trial_responses into previous_trials_responses
+        for key in ['correct', 'incorrect']:
+            self.previous_trials_responses[key].extend(self.current_trial_responses[key])
+        self.current_trial_responses = {'correct': [], 'incorrect': []}
+        self.compute_performance() # compute performance after add current trial responses
+        self.correctiveLoopUpdated.emit(0)
+        # Emit trial numbers
+        current_trial_number = self.count_responses(response_type='trial', previous=True)
+        total_trials = self.count_responses(previous=True)  # all responses
+        self.trialNumbersUpdated.emit(current_trial_number, total_trials)
 
     def _handle_incorrect_response(self):
         """Flash white, then wait the **same** ITI before retrying."""
         self._handle_screen_touch()
-        self._flash_error()  # flash white
+        self._flash_error()
+        # Update corrective loop count for GUI (count corrective_loop responses in current trial)
+        corrective_loops = len([r for r in self.current_trial_responses['incorrect'] if r[1] == 'corrective_loop'])
+        self.correctiveLoopUpdated.emit(corrective_loops + 1)  # +1 for the current one
+        total_trials = self.count_responses(previous=True) + corrective_loops + 1  # all responses
+        self.trialNumbersUpdated.emit(self.count_responses(response_type='trial', previous=True), total_trials)
 
-    def handle_tunnel_crossing_in(self):
+    def handle_tunnel_crossing_in(self): # NOTE: not used
         """
         First IR-beam break inside the tunnel.
         """
+        pass
+        # TODO: update the GUI buttons
+
+    def handle_tunnel_crossing_out(self):
+        """Nothing changes visually; simply keep the same buttons lit."""
         self.tunnel_entered = True
         # TODO: update the GUI buttons
-        # if left_on: self.left_buttons[1] = True  # Display pattern 1
-        # else: self.left_buttons[2] = True  # Display pattern 2
-
-        # if right_on: self.right_buttons[1] = True
-        # else: self.right_buttons[2] = True
-
-    def handle_tunnel_crossing_out(self):  # FIXME: not used
-        """Nothing changes visually; simply keep the same buttons lit."""
-        side = self.get_screen_side()
-
-        # TODO: update the GUI buttons
-        # if side == 'left': self.left_buttons[1] = True
 
     def handle_screen_touch(self, pin_name):
         if pin_name.startswith('left_'):
-            is_correct = self.config.correct_pattern == self.get_pattern_from_side('l')
+            is_correct = self.config.correct_pattern == self._get_pattern_from_side('l')
         elif pin_name.startswith('right_'):
-            is_correct = self.config.correct_pattern == self.get_pattern_from_side('r')
+            is_correct = self.config.correct_pattern == self._get_pattern_from_side('r')
         else:
             raise ValueError('Screen touch triggered from incorrect pin state change')
-        self.touch_result = ('correct' if is_correct else 'incorrect', pin_name)
+        self._touch_result = ('correct' if is_correct else 'incorrect', pin_name)
 
     def _dispatch_changed_pin(self, pin_name: str, edge: Edge = Edge.BOTH):
         match pin_name:
@@ -296,41 +290,50 @@ class BeatBoxExperimentManagerS2(BeatBoxExperimentManagerS1):
     def get_screen_side(self):
         return self.screen_sides[self.n_pellets_retrieved]
 
-    def parse_experiment_config(self):
-        self.log(logging.DEBUG, f'Parsing experiment config: {self.config}')
-        self.config.load()
-        self._phase_table[Phase.INCORRECT_RESPONSE].set_timeout(self.config.error_flash_ms)
-
     def compute_performance(self):
         self._compute_left_performance()
         self._compute_right_performance()
 
+    def count_responses(self, result: str = None, response_type: str = None, side: str = None, previous: bool = True):
+        """
+        Count responses matching the given criteria.
+        - result: 'correct' or 'incorrect' (or None for both)
+        - response_type: 'trial' or 'corrective_loop' (or None for both)
+        - side: 'l' or 'r' (or None for both)
+        - previous: search in previous_trials_responses if True, else current_trial_responses
+        """
+        responses = self.previous_trials_responses if previous else self.current_trial_responses
+        keys = ['correct', 'incorrect'] if result is None else [result]
+        count = 0
+        for key in keys:
+            for r in responses[key]:
+                if ((response_type is None or r[1] == response_type) and
+                    (side is None or r[2] == side)):
+                    count += 1
+        return count
+
     def _compute_left_performance(self):
-        # FIXME: don't hardcode pin name
-        left_correct_count = self.responses['correct'].count('left_response')
-        incorrect = self.responses['incorrect'].count('left_response')
-        if self.trial_no == 0:
+        left_correct = self.count_responses('correct', 'trial', 'l')
+        left_total = left_correct + self.count_responses('incorrect', 'trial', 'l')
+        if not left_total:
             return
-        performance = left_correct_count / (self.trial_no + incorrect)
+        performance = left_correct / left_total
         self.left_performance.append(performance)
-        # GUI
         self.performanceUpdated.emit(self.get_left_performance(), self.get_right_performance())
 
     def _compute_right_performance(self):
-        # FIXME: don't hardcode pin name
-        right_correct_count = self.responses['correct'].count('right_response')
-        incorrect = self.responses['incorrect'].count('right_response')
-        if self.trial_no == 0:
+        right_correct = self.count_responses('correct', 'trial', 'r')
+        right_total = right_correct + self.count_responses('incorrect', 'trial', 'r')
+        if not right_total:
             return
-        performance = right_correct_count / (self.trial_no + incorrect)
+        performance = right_correct / right_total
         self.right_performance.append(performance)
-        # GUI
         self.performanceUpdated.emit(self.get_left_performance(), self.get_right_performance())
 
     def check_performance(self):
         left_performance = self.get_left_performance()
         right_performance = self.get_right_performance()
-        if ((len(self.responses['correct']) >= self.config.n_trials) and
+        if ((len(self.previous_trials_responses['correct']) >= self.config.n_trials) and
                 left_performance >= self.config.learning_threshold and
                 right_performance >= self.config.learning_threshold):
             return True
@@ -359,22 +362,16 @@ class BeatBoxExperimentManagerS2(BeatBoxExperimentManagerS1):
             return 'incomplete'
 
     def log_experiment_data(self, full=False):
-        performance = self.get_right_performance()
-
-        if full:
-            self.log(logging.INFO,
-                    f"""EXPERIMENT SETUP
-                    Minimum number of trials: {self.config.n_trials}
-                    Learning threshold: {self.config.learning_threshold}""")
-
         left_performance = self.get_left_performance()
         right_performance = self.get_right_performance()
+        corrective_loops_count = self.count_responses('incorrect', 'corrective_loop')
+        trial_count = self.count_responses(response_type='trial')
+        total_trials = self.count_responses()
+        if full:
+            self.log(logging.INFO,
+                    f"""EXPERIMENT SETUP\nMinimum number of trials: {self.config.n_trials}\nLearning threshold: {self.config.learning_threshold}""")
         self.log(logging.INFO,
-                 f"""EXPERIMENT DATA
-                 Trial count: {len(self.responses['correct'])}
-                 Corrective loops count: {len(self.responses['incorrect'])}
-                 Left performance: {left_performance:.2f}
-                 Right performance: {right_performance:.2f}""")
+                 f"""EXPERIMENT DATA\nTrial count: {trial_count}\nTotal trials: {total_trials}\nCorrective loops count: {corrective_loops_count}\nLeft performance: {left_performance:.2f}\nRight performance: {right_performance:.2f}""")
 
     def set_experiment_folder(self, experiment_folder):
         super().set_experiment_folder(experiment_folder)

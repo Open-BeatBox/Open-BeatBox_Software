@@ -514,7 +514,8 @@ class BeatBoxCommunicator(QtCore.QObject):  # needs to inherit from QObject to u
                             self.messageReceived.emit(message)
 
             except BufferError as e:
-                logger.debug(f"Serial read_loop: {e}")
+                pass # FIXME: not sure if this exception is really needed
+                # logger.debug(f"Serial read_loop: {e}")
 
             except Exception as e:  # Detailed error message for debugging
                 html = f"""
