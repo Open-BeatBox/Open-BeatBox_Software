@@ -5,9 +5,11 @@ from pathlib import Path
 
 from typing import Dict, Any, List, Optional, get_type_hints
 
+from numpy.ma.core import left_shift
 from qtpy import QtCore, QtWidgets
 
-from beatbox.experiment_managers import SConfig
+from beatbox.experiment_managers import SConfig, BaseExperimentManager
+
 
 class S2Config(SConfig):
     s_level = 'S2'
@@ -288,7 +290,22 @@ class BeatBoxExperimentManagerS2(BeatBoxExperimentManagerS1):
                 self.handle_screen_touch(pin_name)
 
     def get_screen_side(self):
-        return self.screen_sides[self.n_pellets_retrieved]
+        if not self.config.advanced:
+            screen_seq = self.config.screen_sequence
+            correct_side = screen_seq[self.trial_no % len(screen_seq)]
+        else:
+            left_seq = self.config.left_screen_sequence
+            right_seq = self.config.right_screen_sequence
+            left_side = left_seq[self.trial_no % len(left_seq)]
+            right_side = right_seq[self.trial_no % len(right_seq)]
+            if left_side == self.config.correct_pattern:
+                correct_side = 'l'
+            elif right_side == self.config.correct_pattern:
+                correct_side = 'r'
+            else:
+                correct_side = 'x' # invalid
+                self.log(logging.ERROR, 'In advanced mode, left and right screen sequences must be complementary.')
+        return correct_side
 
     def compute_performance(self):
         self._compute_left_performance()
@@ -355,11 +372,29 @@ class BeatBoxExperimentManagerS2(BeatBoxExperimentManagerS1):
         if self.check_performance():
             return 'complete'
         else:
-            self.log(logging.DEBUG, f'Left performance: {left_performance:.2f} -'
+            # Use base logger to avoid keep CSV logging clean
+            BaseExperimentManager.log(self, logging.DEBUG, f'Left performance: {left_performance:.2f} -'
                                     f'Right performance: {right_performance:.2f} -' 
                                     f'Learning threshold not reached.'
                                     f'Stage S{self.stage_number} is not complete.')
             return 'incomplete'
+
+    def log(self, level: int, message: str, state_bits: Optional[Dict[str, Any]] = None):
+        BaseExperimentManager.log(self, level, message)
+        state_bits = state_bits if state_bits is not None else self._get_sensor_bits_from_state_value(self._last_state_value)
+        if self.csv_logger:
+            self.csv_logger.log(
+                stage=self.stage_number,
+                log_level=logging.getLevelName(level),
+                message=message,
+                total_trials=self.count_responses(),
+                trial_number=self.count_responses(response_type='trial') + 1,  # +1 for current trial
+                correct_side=self.get_screen_side(),
+                corrective_loop=self.count_responses('incorrect', 'corrective_loop', previous=False),
+                left_performance=self.get_left_performance(),
+                right_performance=self.get_right_performance(),
+                state_bits=state_bits
+            )
 
     def log_experiment_data(self, full=False):
         left_performance = self.get_left_performance()

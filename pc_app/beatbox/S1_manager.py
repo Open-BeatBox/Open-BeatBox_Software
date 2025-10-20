@@ -164,6 +164,7 @@ class BeatBoxExperimentManagerS1(BaseExperimentManager):
     def set_experiment_folder(self, experiment_folder):
         self.experiment_folder = experiment_folder
         Path(experiment_folder).mkdir(parents=True, exist_ok=True)
+        self._setup_logging()
         self._setup_file_logging()
 
     # attach callbacks to stage specific widgets

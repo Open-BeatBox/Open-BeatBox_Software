@@ -19,11 +19,13 @@ from __future__ import annotations
 
 import warnings
 import logging
+import csv
+import time
 from abc import ABCMeta
-from datetime import datetime
 from pathlib import Path
 from enum import Enum, auto
 from dataclasses import dataclass, field
+from datetime import datetime
 from typing import Callable, Any, Mapping, List, Final, Union, final, Dict, Optional
 
 from configobj import ConfigObj
@@ -225,7 +227,7 @@ class BaseExperimentManager(QtCore.QObject, metaclass=QABCMeta):
             self.set_experiment_folder(experiment_folder)
 
         self.logger = None
-
+        self.csv_logger = None
         # Use the bus to aggregate payloads within a small time window (merge_ms) and send them to the hardware.
         self.bus = SetPayloadOutputBus(merge_ms=5, parent=self)
         self.setPayloadReady.connect(self.bus.post)
@@ -254,27 +256,30 @@ class BaseExperimentManager(QtCore.QObject, metaclass=QABCMeta):
             self._timer.stop() # No need to reset counter as timer.start(timeout_ms) will do it
         self._phase_iti() # reset to a known state
         self.log(logging.INFO, 'Experiment ended.')
+        if hasattr(self, 'logger') and isinstance(self.logger, ExperimentCSVLogger):
+            self.logger.close()
 
-    def _setup_file_logging(self):
-        log_dir = Path(self.experiment_folder)
-        timestamp = datetime.now().strftime("%d%m%y_%H%M%S")
-        log_filename = f"S{self.stage_number}_{timestamp}.csv"
-        log_path = log_dir / log_filename
-
+    def _setup_logging(self):
         self.logger = logging.getLogger(f'ExperimentManagerS{self.stage_number}')
         self.logger.setLevel(logging.INFO)
+        self.propagate=True
 
-        file_handler = logging.FileHandler(log_path)
-        file_handler.setLevel(logging.INFO)
-        formatter = logging.Formatter('%(asctime)s; %(levelname)s; %(message)s')
-        file_handler.setFormatter(formatter)
+    def _setup_file_logging(self):
+        # Use ExperimentCSVLogger for robust CSV logging
+        self.csv_logger = ExperimentCSVLogger(
+            experiment_folder=self.experiment_folder,
+            stage_number=self.stage_number,
+            sensor_pin_names=self.sensors_pins_config.pin_names
+        )
 
-        self.logger.addHandler(file_handler)
-        self.logger.propagate = True
 
     def log(self, level, message):
+        """ Basic method to log a message with the given level.
+        This method can be overridden in subclasses to implement custom logging behavior.
+        """
         if self.logger:
             self.logger.log(level, message)
+
 
     # ##################################  STATE MACHINE  ##################################
 
@@ -405,22 +410,20 @@ class BaseExperimentManager(QtCore.QObject, metaclass=QABCMeta):
 
     @QtCore.Slot(int)
     def _on_state_value(self, state_word: int):
-        """
-        Decode MCU state; subclasses override *only* what changes.
-        """
-        state_value = state_word & 0xFF  # ignore upper byte
-        # state_value = (state_word[0] << 8) | state_word[1]  # Decode the payload into a single integer.
-        sensor_bits = [(state_value >> i) & 0x01
-                       for i in range(len(self.sensors_pins_config.pin_names))]
+        state_value = state_word & 0xFF
+        self._last_state_value = state_value  # Store for logging
+        sensor_bits = self._get_sensor_bits_from_state_value(state_value)
         self.sensorsStateChanged.emit(sensor_bits)
-        # TODO: parametrize logging level with config file
-        self.log(logging.INFO, f'State value: {state_value:#04x} ({state_value:03d}); state bits, {", ".join(str(bit) for bit in sensor_bits)}')
-
+        # self.log(logging.INFO, f'State value: {state_value:#04x} ({state_value:03d}); state bits, {", ".join(str(bit) for bit in sensor_bits)}', state_bits=sensor_bits)
         changed_pins = {pin_name: bool(pin_on) for pin_name, pin_on in zip(self.sensors_pins_config.pin_names, sensor_bits)
                         if bool(pin_on) != self.sensors_pins_config._current_states[pin_name]}
-        self.log(logging.DEBUG, f'Changed pins: {changed_pins}')
+        self.log(logging.DEBUG, f'Changed pins: {changed_pins}', state_bits=sensor_bits)
         for pin_name, bit_state in changed_pins.items():
             self._handle_input_pin_changed(pin_name, bit_state)
+
+    def _get_sensor_bits_from_state_value(self, state_value: int) -> list[int]:
+        sensor_bits = [(state_value >> i) & 0x01 for i in range(len(self.sensors_pins_config.pin_names))]
+        return sensor_bits
 
     def _handle_input_pin_changed(self, pin_name: str, bit: bool):
         """
@@ -484,3 +487,33 @@ class BaseExperimentManager(QtCore.QObject, metaclass=QABCMeta):
 
     def handle_n_trials_changed(self, value):...
     def handle_inter_trial_interval_changed(self, value): ...
+
+class ExperimentCSVLogger:
+    def __init__(self, experiment_folder, stage_number, sensor_pin_names):
+        self.start_time = time.time()
+        timestamp = datetime.now().strftime("%d%m%y_%H%M%S")
+        log_filename = f"S{stage_number}_{timestamp}.csv"
+        self.file_path = Path(experiment_folder) / log_filename
+        self.sensor_pin_names = sensor_pin_names
+        self.file = open(self.file_path, "w", newline="")
+        self.writer = csv.writer(self.file)
+        header = [
+            "timestamp_s", "stage", "log_level", "message",
+            "correct_side", "total_trials", "trial_number", "corrective_loop",
+            "left_performance", "right_performance"
+        ] + [f"state_{name}" for name in sensor_pin_names]
+        self.writer.writerow(header)
+
+    def log(self, stage, log_level, message, total_trials, trial_number, correct_side,
+            corrective_loop, left_performance, right_performance, state_bits):
+        timestamp_s = f"{(time.time() - self.start_time):.3f}"
+        row = [
+            timestamp_s, stage, log_level, message,
+            correct_side, total_trials, trial_number, corrective_loop,
+            left_performance, right_performance
+        ] + list(state_bits)
+        self.writer.writerow(row)
+        self.file.flush()
+
+    def close(self):
+        self.file.close()

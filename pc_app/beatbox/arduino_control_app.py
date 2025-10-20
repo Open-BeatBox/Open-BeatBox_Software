@@ -49,7 +49,7 @@ class ArduinoControlApp(QtWidgets.QMainWindow):
         self.communicator.errorOccurred.connect(self.on_error)
 
         self.with_neopixels = with_neopixels
-        self.experiment_manager = BeatBoxExperimentManagerS2(experiment_folder, self.communicator,
+        self.experiment_manager = BeatBoxExperimentManagerS1(experiment_folder, self.communicator,
                                                              main_window=self)
 
         self.connect_signal_from_experiment_manager()
