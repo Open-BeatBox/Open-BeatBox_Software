@@ -44,7 +44,7 @@ class BeatBoxExperimentManagerS2(BeatBoxExperimentManagerS1):
 
     performanceUpdated = QtCore.Signal(float, float)
     correctiveLoopUpdated = QtCore.Signal(int)
-    trialNumbersUpdated = QtCore.Signal(int, int)
+
 
     def __init__(self, experiment_folder, communicator,
                  main_window=None, actuator_pins_cfg: PinConfig=None):
@@ -273,6 +273,20 @@ class BeatBoxExperimentManagerS2(BeatBoxExperimentManagerS1):
         self._touch_result = ('correct' if is_correct else 'incorrect', pin_name)
 
     def _dispatch_changed_pin(self, pin_name: str, edge: Edge = Edge.BOTH):
+        """
+        Dispatch pin changes to the appropriate handlers.
+        1. nose_poke: handle pellet delivery/retrieval
+        2. left_tunnel_crossing: handle tunnel crossing in
+        3. right_tunnel_crossing: handle tunnel crossing out
+        4. left_response/right_response: handle screen touch
+
+        Parameters
+        ----------
+        pin_name : str
+            The name of the pin that changed state.
+        edge : Edge
+            The edge type (RISING, FALLING, BOTH).
+        """
         match pin_name:
             case 'nose_poke':
                 match edge:

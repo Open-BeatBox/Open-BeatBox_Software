@@ -2,10 +2,10 @@ from __future__ import annotations
 
 import logging
 from pathlib import Path
-from typing import List
+from typing import Dict, Any, List, Optional
 
 from configobj import ConfigObj
-from qtpy import QtWidgets
+from qtpy import QtWidgets, QtCore
 
 from beatbox.experiment_managers import BaseExperimentManager, Phase, PhaseSpec, Edge, SConfig
 from beatbox.utils import PinConfig
@@ -28,6 +28,8 @@ class BeatBoxExperimentManagerS1(BaseExperimentManager):
     Pellet delivery and pellet arrival logic have been decoupled for clarity.
     """
     stage_number = 1
+
+    trialNumbersUpdated = QtCore.Signal(int, int)
 
     def __init__(self, experiment_folder, communicator,
                  main_window=None, actuator_pins_cfg: PinConfig = None):
@@ -83,6 +85,7 @@ class BeatBoxExperimentManagerS1(BaseExperimentManager):
         # self.turn_off_screens()
         self.set_outputs(default=True, flush=True) # Force defaults
         self.waiting_for_pellet_retrieval = False
+        self.trialNumbersUpdated.emit(self.trial_no, self.trial_no)
 
     def _phase_deliver_pellet(self):
         # don't deliver a reward if somehow there's already something there
@@ -118,8 +121,8 @@ class BeatBoxExperimentManagerS1(BaseExperimentManager):
         self.log(logging.DEBUG, f'Starting trial {self.n_pellets_retrieved + 1} of {self.config.n_trials}')
 
     def _phase_done(self):
-        self.log(logging.INFO, f'S1 Experiment done.\n'
-                                f'Number of trials: {self.trial_no}, number of pellets retrieved: {self.n_pellets_retrieved}')
+        self.log(logging.INFO, f'{self.config.s_level} Experiment done.\n'
+                                f'Number of trials: {self.trial_no - 1}, number of pellets retrieved: {self.n_pellets_retrieved}')
         self.trial_no = 0
 
     def handle_pellet_delivered(self):
@@ -166,6 +169,23 @@ class BeatBoxExperimentManagerS1(BaseExperimentManager):
         Path(experiment_folder).mkdir(parents=True, exist_ok=True)
         self._setup_logging()
         self._setup_file_logging()
+
+    def log(self, level: int, message: str, state_bits: Optional[Dict[str, Any]] = None):
+        BaseExperimentManager.log(self, level, message)
+        state_bits = state_bits if state_bits is not None else self._get_sensor_bits_from_state_value(self._last_state_value)
+        if self.csv_logger:
+            self.csv_logger.log(
+                stage=self.stage_number,
+                log_level=logging.getLevelName(level),
+                message=message,
+                total_trials=self.n_pellets_retrieved + 1,
+                trial_number=self.n_pellets_retrieved + 1,  # +1 for current trial
+                correct_side='x',
+                corrective_loop=0,
+                left_performance=0,
+                right_performance=0,
+                state_bits=state_bits
+            )
 
     # attach callbacks to stage specific widgets
     def link_widgets(self):

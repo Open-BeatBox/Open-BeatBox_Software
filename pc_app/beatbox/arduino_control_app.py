@@ -33,10 +33,9 @@ SERIAL_TIMEOUT = 60 #2  # FIXME: change back to 2
 
 BAUD_RATE = 115200
 
-
 class ArduinoControlApp(QtWidgets.QMainWindow):
     def __init__(self, pins_config_file, experiment_folder='',
-                 with_neopixels=False, n_trials=20, inter_trial_interval=10000):
+                 with_neopixels=False, n_trials=20, inter_trial_interval=10000, stage='S1'):
         super().__init__()
 
         # First instantiate QtObjects needed by communicator
@@ -49,9 +48,12 @@ class ArduinoControlApp(QtWidgets.QMainWindow):
         self.communicator.errorOccurred.connect(self.on_error)
 
         self.with_neopixels = with_neopixels
-        self.experiment_manager = BeatBoxExperimentManagerS1(experiment_folder, self.communicator,
-                                                             main_window=self)
-
+        if stage == 'S1':
+            self.experiment_manager = BeatBoxExperimentManagerS1(experiment_folder, self.communicator, main_window=self)
+        elif stage == 'S2':
+            self.experiment_manager = BeatBoxExperimentManagerS2(experiment_folder, self.communicator, main_window=self)
+        else:
+            raise ValueError(f"Unknown stage: {stage}")
         self.connect_signal_from_experiment_manager()
 
         # UI Elements
@@ -89,12 +91,16 @@ class ArduinoControlApp(QtWidgets.QMainWindow):
     def connect_signal_from_experiment_manager(self):
         self.experiment_manager.sensorsStateChanged.connect(self._paint_sensor_leds)
         self.experiment_manager.actuatorsStateChanged.connect(self._paint_actuator_leds)
+        if self.experiment_manager.stage_number == 1:
+            self.experiment_manager.trialNumbersUpdated.connect(
+                lambda current, total: (self.s1_current_trial_value_label.setText(str(current))))
         if self.experiment_manager.stage_number >= 2:
             self.experiment_manager.performanceUpdated.connect(self._update_performance)
             self.experiment_manager.correctiveLoopUpdated.connect(self._update_corrective_loop)
             self.experiment_manager.trialNumbersUpdated.connect(self._update_trial_numbers)
 
     def setup_ui(self):
+        """ Set up the main UI layout and widgets. """
         central_widget = QtWidgets.QWidget()
         self.setCentralWidget(central_widget)
         main_layout = QtWidgets.QVBoxLayout(central_widget)
@@ -130,7 +136,6 @@ class ArduinoControlApp(QtWidgets.QMainWindow):
         self.stage_combobox.setMinimumWidth(100)
         self.stage_combobox.addItems(['S1', 'S2', 'S3'])
 
-
         # Controls for n_trials and inter_trial_interval
         self.n_trials_spinbox = QtWidgets.QSpinBox()
         self.n_trials_spinbox.setRange(1, 9999)
@@ -149,67 +154,16 @@ class ArduinoControlApp(QtWidgets.QMainWindow):
         self.experiment_state_btn.clicked.connect(self.start_experiment)
         overall_experiment_layout.addWidget(self.experiment_state_btn)
 
-        ###### S2 experiment specific widgets
-        s2_experiment_group = QtWidgets.QGroupBox("S2 setup")
-        s2_layout = QtWidgets.QHBoxLayout(s2_experiment_group)
-
-        # Error flash duration
-        self.error_flash_spinbox = QtWidgets.QSpinBox()
-        self.error_flash_spinbox.setRange(1, 999999)
-        self.error_flash_spinbox.setValue(
-            self.experiment_manager.config.error_flash_ms)
-        s2_layout.addWidget(QtWidgets.QLabel("Error Flash (ms):"))
-        s2_layout.addWidget(self.error_flash_spinbox)
-
-        # Learning threshold
-        self.learning_threshold_spinbox = QtWidgets.QDoubleSpinBox()
-        self.learning_threshold_spinbox.setRange(0, 1)
-        self.learning_threshold_spinbox.setSingleStep(0.01)
-        self.learning_threshold_spinbox.setDecimals(2)
-        self.learning_threshold_spinbox.setValue(
-            self.experiment_manager.config.learning_threshold)
-        s2_layout.addWidget(QtWidgets.QLabel("Learning threshold:"))
-        s2_layout.addWidget(self.learning_threshold_spinbox)
-
-        # Experiment Data group
-        experiment_data_group = QtWidgets.QGroupBox("Experiment Data")
-        experiment_data_layout = QtWidgets.QVBoxLayout(experiment_data_group)
-
-        # Performance row
-        performance_layout = QtWidgets.QHBoxLayout()
-        left_label = QtWidgets.QLabel("Left performance:")
-        self.left_value_label = QtWidgets.QLabel(f"{0:.2f}")
-        self.left_value_label.setTextInteractionFlags(QtCore.Qt.TextSelectableByMouse)
-        performance_layout.addWidget(left_label)
-        performance_layout.addWidget(self.left_value_label)
-        right_label = QtWidgets.QLabel("Right performance:")
-        self.right_value_label = QtWidgets.QLabel(f"{0:.2f}")
-        self.right_value_label.setTextInteractionFlags(QtCore.Qt.TextSelectableByMouse)
-        performance_layout.addWidget(right_label)
-        performance_layout.addWidget(self.right_value_label)
-        experiment_data_layout.addLayout(performance_layout)
-
-        # Trial info row
-        trial_info_layout = QtWidgets.QHBoxLayout()
-        total_trials_label = QtWidgets.QLabel("Total trials:")
-        self.total_trials_value_label = QtWidgets.QLabel("0")
-        self.total_trials_value_label.setTextInteractionFlags(QtCore.Qt.TextSelectableByMouse)
-        trial_info_layout.addWidget(total_trials_label)
-        trial_info_layout.addWidget(self.total_trials_value_label)
-        current_trial_label = QtWidgets.QLabel("Current trial number:")
-        self.current_trial_value_label = QtWidgets.QLabel("0")
-        self.current_trial_value_label.setTextInteractionFlags(QtCore.Qt.TextSelectableByMouse)
-        trial_info_layout.addWidget(current_trial_label)
-        trial_info_layout.addWidget(self.current_trial_value_label)
-        corrective_loop_label = QtWidgets.QLabel("Corrective loop count:")
-        self.corrective_loop_value_label = QtWidgets.QLabel("0")
-        self.corrective_loop_value_label.setTextInteractionFlags(QtCore.Qt.TextSelectableByMouse)
-        trial_info_layout.addWidget(corrective_loop_label)
-        trial_info_layout.addWidget(self.corrective_loop_value_label)
-        experiment_data_layout.addLayout(trial_info_layout)
-
         experiment_layout.addWidget(overall_group)
-        experiment_layout.addWidget(s2_experiment_group)
+
+        ###### S2 experiment specific widgets
+        if self.experiment_manager.stage_number == 1:
+            experiment_data_group = self._ui_setup_s1_data()
+        else:
+            s2_experiment_group = self._ui_setup_s2_controller()
+            experiment_data_group = self._ui_setup_s2_data()
+            experiment_layout.addWidget(s2_experiment_group)
+
         experiment_layout.addWidget(experiment_data_group)
         main_layout.addWidget(experiment_group)
 
@@ -237,6 +191,82 @@ class ArduinoControlApp(QtWidgets.QMainWindow):
 
         # Logging area
         main_layout.addWidget(self.log_text)
+
+    def _ui_setup_s2_data(self):
+        # Experiment Data group
+        s2_data_group = QtWidgets.QGroupBox("Experiment Data")
+        s2_data_layout = QtWidgets.QVBoxLayout(s2_data_group)
+
+        # Performance row
+        performance_layout = QtWidgets.QHBoxLayout()
+        left_label = QtWidgets.QLabel("Left performance:")
+        self.left_value_label = QtWidgets.QLabel(f"{0:.2f}")
+        self.left_value_label.setTextInteractionFlags(QtCore.Qt.TextSelectableByMouse)
+        performance_layout.addWidget(left_label)
+        performance_layout.addWidget(self.left_value_label)
+        right_label = QtWidgets.QLabel("Right performance:")
+        self.right_value_label = QtWidgets.QLabel(f"{0:.2f}")
+        self.right_value_label.setTextInteractionFlags(QtCore.Qt.TextSelectableByMouse)
+        performance_layout.addWidget(right_label)
+        performance_layout.addWidget(self.right_value_label)
+        s2_data_layout.addLayout(performance_layout)
+
+        # Trial info row
+        trial_info_layout = QtWidgets.QHBoxLayout()
+        total_trials_label = QtWidgets.QLabel("Total trials:")
+        self.total_trials_value_label = QtWidgets.QLabel("0")
+        self.total_trials_value_label.setTextInteractionFlags(QtCore.Qt.TextSelectableByMouse)
+        trial_info_layout.addWidget(total_trials_label)
+        trial_info_layout.addWidget(self.total_trials_value_label)
+        current_trial_label = QtWidgets.QLabel("Current trial number:")
+        self.current_trial_value_label = QtWidgets.QLabel("0")
+        self.current_trial_value_label.setTextInteractionFlags(QtCore.Qt.TextSelectableByMouse)
+        trial_info_layout.addWidget(current_trial_label)
+        trial_info_layout.addWidget(self.current_trial_value_label)
+        corrective_loop_label = QtWidgets.QLabel("Corrective loop count:")
+        self.corrective_loop_value_label = QtWidgets.QLabel("0")
+        self.corrective_loop_value_label.setTextInteractionFlags(QtCore.Qt.TextSelectableByMouse)
+        trial_info_layout.addWidget(corrective_loop_label)
+        trial_info_layout.addWidget(self.corrective_loop_value_label)
+        s2_data_layout.addLayout(trial_info_layout)
+        return s2_data_group
+
+    def _ui_setup_s1_data(self):
+        """
+        Creates and returns a QWidget for S1 experiment data, showing current trial number.
+        """
+        s1_data_group = QtWidgets.QGroupBox("Experiment Data")
+        s1_data_layout = QtWidgets.QVBoxLayout(s1_data_group)
+        trial_layout = QtWidgets.QHBoxLayout()
+        current_trial_label = QtWidgets.QLabel("Current trial:")
+        self.s1_current_trial_value_label = QtWidgets.QLabel("0")
+        trial_layout.addWidget(current_trial_label)
+        trial_layout.addWidget(self.s1_current_trial_value_label)
+        s1_data_layout.addLayout(trial_layout)
+        return s1_data_group
+
+    def _ui_setup_s2_controller(self):
+        s2_experiment_group = QtWidgets.QGroupBox("S2 setup")
+        s2_layout = QtWidgets.QHBoxLayout(s2_experiment_group)
+
+        # Error flash duration
+        self.error_flash_spinbox = QtWidgets.QSpinBox()
+        self.error_flash_spinbox.setRange(1, 999999)
+        self.error_flash_spinbox.setValue(
+            self.experiment_manager.config.error_flash_ms)
+        s2_layout.addWidget(QtWidgets.QLabel("Error Flash (ms):"))
+        s2_layout.addWidget(self.error_flash_spinbox)
+
+        # Learning threshold
+        self.learning_threshold_spinbox = QtWidgets.QDoubleSpinBox()
+        self.learning_threshold_spinbox.setRange(0, 1)
+        self.learning_threshold_spinbox.setSingleStep(0.01)
+        self.learning_threshold_spinbox.setDecimals(2)
+        self.learning_threshold_spinbox.setValue(
+            self.experiment_manager.config.learning_threshold)
+        s2_layout.addWidget(QtWidgets.QLabel("Learning threshold:"))
+        s2_layout.addWidget(self.learning_threshold_spinbox)
+        return s2_experiment_group
 
     def __setup_actuators(self, main_layout):
         actuators_group = QtWidgets.QGroupBox("Actuators")
@@ -513,6 +543,23 @@ class ArduinoControlApp(QtWidgets.QMainWindow):
         self.log_text.append(formatted)
 
 
+class StageSelectDialog(QtWidgets.QDialog):
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.setWindowTitle("Select Experiment Stage")
+        layout = QtWidgets.QVBoxLayout(self)
+        self.combo = QtWidgets.QComboBox()
+        self.combo.addItems(["S1", "S2"])
+        layout.addWidget(QtWidgets.QLabel("Choose experiment stage:"))
+        layout.addWidget(self.combo)
+        btn = QtWidgets.QPushButton("OK")
+        btn.clicked.connect(self.accept)
+        layout.addWidget(btn)
+
+    def selected_stage(self):
+        return self.combo.currentText()
+
+
 def main():
 
     parser = argparse.ArgumentParser("BeatBox Arduino Control App",
@@ -531,7 +578,6 @@ def main():
                         help="Path to a configuration file to load settings from.")
     args = parser.parse_args()
 
-
     app = QtWidgets.QApplication(sys.argv)
     app.setStyleSheet(qdarkstyle.load_stylesheet())
     config_path = Path(args.pins_config_file).expanduser()
@@ -540,6 +586,13 @@ def main():
                       f"Defaulting to the one in the package.")
         config_path = Path(__file__).parent / 'pins_config.cfg'
 
+    # Prompt for stage selection before instantiating ArduinoControlApp
+    dialog = StageSelectDialog()
+    if dialog.exec_() != QtWidgets.QDialog.Accepted:
+        sys.exit(0)
+    selected_stage = dialog.selected_stage()
+
+    # Now instantiate ArduinoControlApp with the correct stage
     if args.from_config_file and os.path.exists(args.from_config_file):
         params_path = Path(args.from_config_file)
         if not params_path.exists():
@@ -547,15 +600,18 @@ def main():
         params = ConfigObj(args.from_config_file, encoding='utf-8',  unrepr=True)
         window = ArduinoControlApp(str(config_path), experiment_folder=str(Path(args.from_config_file).parent),
                                    with_neopixels=params['with_neopixels'],
-                                   n_trials=params['n_trials'], inter_trial_interval=params['inter_trial_interval_ms'])
+                                   n_trials=params['n_trials'], inter_trial_interval=params['inter_trial_interval_ms'],
+                                   stage=selected_stage)
     else:
         window = ArduinoControlApp(str(config_path), experiment_folder='',
                                    with_neopixels=args.with_neopixels,
-                                   n_trials=args.n_trials, inter_trial_interval=args.inter_trial_interval)
+                                   n_trials=args.n_trials, inter_trial_interval=args.inter_trial_interval,
+                                   stage=selected_stage)
 
+    window.stage_combobox.setCurrentText(selected_stage)
+    window.refresh_ports()
     window.show()
     sys.exit(app.exec_())
-
 
 if __name__ == "__main__":
     main()

@@ -298,7 +298,7 @@ class BaseExperimentManager(QtCore.QObject, metaclass=QABCMeta):
             if spec.timeout_ms is None and spec.decide is None:
                 raise ValueError(f"Phase {phase} of {self.__class__.__name__} has neither timeout nor decide function. "
                                  f"This would create a deadlock and is therefore prohibited.")
-        self.trial_no = 0
+        self.trial_no = 1
         self.log(logging.INFO, f"Starting state machine for {self.__class__.__name__} with {self._phase_table_initial}")
         self._goto(self._phase_table_initial)
 
