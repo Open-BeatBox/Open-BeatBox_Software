@@ -199,6 +199,7 @@ class BaseExperimentManager(QtCore.QObject, metaclass=QABCMeta):
     trialStarted = QtCore.Signal(int)  # WARNING: unbound
     nextTrialRequested = QtCore.Signal()
 
+    stageEnded = QtCore.Signal(str)  # stage name
 
     def __init__(self, experiment_folder: str | Path, communicator: BeatBoxCommunicator,
                  main_window: QtWidgets.QMainWindow = None,
@@ -214,9 +215,11 @@ class BaseExperimentManager(QtCore.QObject, metaclass=QABCMeta):
 
         self._out_word = self.actuator_pins_cfg.default_word()
 
-        self.experiment_folder = experiment_folder
-        self.reward_duration = 150  # time reward pin stays high in ms  # TODO: parametrize
         self.main_window = main_window
+        self.experiment_folder = experiment_folder
+        self._last_state_value = 0
+        self.reward_duration = 150  # time reward pin stays high in ms  # TODO: parametrize
+        self.trial_no = 0
         self.waiting_for_pellet_delivery = False
         self.pellet_delivered = False
         self.n_pellets_retrieved = 0 # also the current trial number
@@ -298,7 +301,6 @@ class BaseExperimentManager(QtCore.QObject, metaclass=QABCMeta):
             if spec.timeout_ms is None and spec.decide is None:
                 raise ValueError(f"Phase {phase} of {self.__class__.__name__} has neither timeout nor decide function. "
                                  f"This would create a deadlock and is therefore prohibited.")
-        self.trial_no = 1
         self.log(logging.INFO, f"Starting state machine for {self.__class__.__name__} with {self._phase_table_initial}")
         self._goto(self._phase_table_initial)
 

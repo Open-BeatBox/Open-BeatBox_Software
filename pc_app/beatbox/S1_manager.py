@@ -124,6 +124,7 @@ class BeatBoxExperimentManagerS1(BaseExperimentManager):
         self.log(logging.INFO, f'{self.config.s_level} Experiment done.\n'
                                 f'Number of trials: {self.trial_no - 1}, number of pellets retrieved: {self.n_pellets_retrieved}')
         self.trial_no = 0
+        self.stageEnded.emit(self.config.s_level)
 
     def handle_pellet_delivered(self):
         if not self.waiting_for_pellet_delivery:

@@ -195,6 +195,7 @@ class BeatBoxExperimentManagerS2(BeatBoxExperimentManagerS1):
     def _phase_done(self):
         self.log(logging.INFO, f'Stage S{self.stage_number} is complete.')
         self.log_experiment_data(full=True)
+        self.stageEnded.emit(self.config.s_level)
 
     def _flash_error(self):
         # Setting both White and Black patterns makes the screen blink
@@ -246,9 +247,9 @@ class BeatBoxExperimentManagerS2(BeatBoxExperimentManagerS1):
         self._handle_screen_touch()
         self._flash_error()
         # Update corrective loop count for GUI (count corrective_loop responses in current trial)
-        corrective_loops = len([r for r in self.current_trial_responses['incorrect'] if r[1] == 'corrective_loop'])
-        self.correctiveLoopUpdated.emit(corrective_loops + 1)  # +1 for the current one
-        total_trials = self.count_responses(previous=True) + corrective_loops + 1  # all responses
+        corrective_loops = self.count_responses(response_type='incorrect', previous=False)
+        self.correctiveLoopUpdated.emit(corrective_loops)  # +1 for the current one
+        total_trials = self.count_responses(previous=True) + corrective_loops  # all responses
         self.trialNumbersUpdated.emit(self.count_responses(response_type='trial', previous=True), total_trials)
 
     def handle_tunnel_crossing_in(self): # NOTE: not used
@@ -404,7 +405,7 @@ class BeatBoxExperimentManagerS2(BeatBoxExperimentManagerS1):
                 total_trials=self.count_responses(),
                 trial_number=self.count_responses(response_type='trial') + 1,  # +1 for current trial
                 correct_side=self.get_screen_side(),
-                corrective_loop=self.count_responses('incorrect', 'corrective_loop', previous=False),
+                corrective_loop=self.count_responses(result='incorrect', response_type='corrective_loop', previous=False),
                 left_performance=self.get_left_performance(),
                 right_performance=self.get_right_performance(),
                 state_bits=state_bits
@@ -413,14 +414,14 @@ class BeatBoxExperimentManagerS2(BeatBoxExperimentManagerS1):
     def log_experiment_data(self, full=False):
         left_performance = self.get_left_performance()
         right_performance = self.get_right_performance()
-        corrective_loops_count = self.count_responses('incorrect', 'corrective_loop')
-        trial_count = self.count_responses(response_type='trial')
+        corrective_loops_count = self.count_responses(result='incorrect', previous=False)
+        trial_count = self.count_responses(response_type='trial') + 1
         total_trials = self.count_responses()
         if full:
             self.log(logging.INFO,
                     f"""EXPERIMENT SETUP\nMinimum number of trials: {self.config.n_trials}\nLearning threshold: {self.config.learning_threshold}""")
         self.log(logging.INFO,
-                 f"""EXPERIMENT DATA\nTrial count: {trial_count}\nTotal trials: {total_trials}\nCorrective loops count: {corrective_loops_count}\nLeft performance: {left_performance:.2f}\nRight performance: {right_performance:.2f}""")
+                 f"""EXPERIMENT DATA\nTrial count (current included): {trial_count}\nTotal trials: {total_trials}\nCorrective loops count: {corrective_loops_count}\nLeft performance: {left_performance:.2f}\nRight performance: {right_performance:.2f}""")
 
     def set_experiment_folder(self, experiment_folder):
         super().set_experiment_folder(experiment_folder)

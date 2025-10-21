@@ -35,7 +35,8 @@ BAUD_RATE = 115200
 
 class ArduinoControlApp(QtWidgets.QMainWindow):
     def __init__(self, pins_config_file, experiment_folder='',
-                 with_neopixels=False, n_trials=20, inter_trial_interval=10000, stage='S1'):
+                 with_neopixels=False, n_trials=20, inter_trial_interval=10000, stage='S1',
+                 transition=False):
         super().__init__()
 
         # First instantiate QtObjects needed by communicator
@@ -55,6 +56,7 @@ class ArduinoControlApp(QtWidgets.QMainWindow):
         else:
             raise ValueError(f"Unknown stage: {stage}")
         self.connect_signal_from_experiment_manager()
+        self.enable_transitions = transition
 
         # UI Elements
         self.port_combobox = QtWidgets.QComboBox()
@@ -77,7 +79,7 @@ class ArduinoControlApp(QtWidgets.QMainWindow):
             self.color_preview = QtWidgets.QLabel()
 
         self.setWindowTitle('Beatbox Controller')
-        self.setup_ui()
+        self.main_layout = self.setup_ui()
         self.experiment_manager.link_widgets()
 
         # Connect global log signals to our UI append function.
@@ -91,6 +93,7 @@ class ArduinoControlApp(QtWidgets.QMainWindow):
     def connect_signal_from_experiment_manager(self):
         self.experiment_manager.sensorsStateChanged.connect(self._paint_sensor_leds)
         self.experiment_manager.actuatorsStateChanged.connect(self._paint_actuator_leds)
+        self.experiment_manager.stageEnded.connect(self.handle_stage_end)
         if self.experiment_manager.stage_number == 1:
             self.experiment_manager.trialNumbersUpdated.connect(
                 lambda current, total: (self.s1_current_trial_value_label.setText(str(current))))
@@ -121,6 +124,7 @@ class ArduinoControlApp(QtWidgets.QMainWindow):
         ##########################   Experiment   #########################
 
         experiment_group = QtWidgets.QGroupBox("Experiment Setup")
+        experiment_group.setObjectName("experiment_group")
         experiment_layout = QtWidgets.QVBoxLayout(experiment_group)
 
         ######### Overall experiment widgets
@@ -164,6 +168,7 @@ class ArduinoControlApp(QtWidgets.QMainWindow):
             experiment_data_group = self._ui_setup_s2_data()
             experiment_layout.addWidget(s2_experiment_group)
 
+        experiment_data_group.setObjectName("experiment_data_group")
         experiment_layout.addWidget(experiment_data_group)
         main_layout.addWidget(experiment_group)
 
@@ -191,6 +196,32 @@ class ArduinoControlApp(QtWidgets.QMainWindow):
 
         # Logging area
         main_layout.addWidget(self.log_text)
+
+        return main_layout
+
+    def _ui_update_s1_to_s2(self):
+        """
+        Remove S1-specific widgets and add S2-specific widgets and data group.
+        """
+        # Find experiment_group
+        experiment_group = self.findChild(QtWidgets.QGroupBox, "experiment_group")
+        if not experiment_group:
+            return
+        experiment_layout = experiment_group.layout()
+        # Remove experiment_data_group if present
+        for i in range(experiment_layout.count()):
+            item = experiment_layout.itemAt(i)
+            widget = item.widget()
+            if widget and widget.objectName() == "experiment_data_group":
+                experiment_layout.removeWidget(widget)
+                widget.setParent(None)
+                break
+        # Add S2-specific widgets
+        s2_experiment_group = self._ui_setup_s2_controller()
+        experiment_data_group = self._ui_setup_s2_data()
+        experiment_data_group.setObjectName("experiment_data_group")
+        experiment_layout.addWidget(s2_experiment_group)
+        experiment_layout.addWidget(experiment_data_group)
 
     def _ui_setup_s2_data(self):
         # Experiment Data group
@@ -366,6 +397,42 @@ class ArduinoControlApp(QtWidgets.QMainWindow):
         self.experiment_state_btn.clicked.connect(self.start_experiment)
         logger.debug("Stopping experiment.")
 
+    def handle_stage_end(self, reason: str):
+        if not self.enable_transitions:
+            return
+        match reason:
+            case 'S1':
+                self.append_log(
+                    f"Stage {self.experiment_manager.config.s_level} Complete. "
+                    "Stage S1 complete. Moving to Stage S2.",
+                    logging.INFO
+                )
+                s1_folder = self.experiment_manager.experiment_folder
+                s2_manager = BeatBoxExperimentManagerS2(
+                    s1_folder,
+                    self.communicator,
+                    main_window=self
+                )
+                self.experiment_manager.deleteLater()
+                self.experiment_manager = s2_manager
+                # FIXME: writing in the same CSV file would make more sense
+                self.experiment_manager.set_experiment_folder(s1_folder)  # initiate new logging
+                self._ui_update_s1_to_s2()
+                self.connect_signal_from_experiment_manager()
+                self.experiment_manager.link_widgets()
+                self.experiment_manager.start_experiment()
+            case 'S2':
+                self.append_log(
+                    f"Stage {self.experiment_manager.config.s_level} Complete. "
+                    "Stage S2 complete. Moving to Stage S3.",
+                    logging.INFO
+                )
+                # TODO: implement S3 manager and transition
+            case _:
+                QtWidgets.QMessageBox.information(
+                    self, f"Stage {self.experiment_manager.config.s_level} Complete",
+                    "Experiment complete.")
+
     def setup_neopixels_ui(self, main_layout):
         neopixel_group = QtWidgets.QGroupBox("Neopixel Control")
         layout = QtWidgets.QVBoxLayout(neopixel_group)
@@ -537,7 +604,7 @@ class ArduinoControlApp(QtWidgets.QMainWindow):
         dialog.exec_()
 
     def append_log(self, message: str, level: int = logging.DEBUG):
-        colors = {logging.WARNING: "orange", logging.ERROR: "red"}
+        colors = {logging.INFO: "yellow", logging.WARNING: "orange", logging.ERROR: "red"}
         color = colors.get(level, "white")
         formatted = f'<font color="{color}">{message}</font>'
         self.log_text.append(formatted)
@@ -549,7 +616,7 @@ class StageSelectDialog(QtWidgets.QDialog):
         self.setWindowTitle("Select Experiment Stage")
         layout = QtWidgets.QVBoxLayout(self)
         self.combo = QtWidgets.QComboBox()
-        self.combo.addItems(["S1", "S2"])
+        self.combo.addItems(["All", "S1", "S2"]) # FIXME: maybe use enum for stages instead
         layout.addWidget(QtWidgets.QLabel("Choose experiment stage:"))
         layout.addWidget(self.combo)
         btn = QtWidgets.QPushButton("OK")
@@ -558,7 +625,6 @@ class StageSelectDialog(QtWidgets.QDialog):
 
     def selected_stage(self):
         return self.combo.currentText()
-
 
 def main():
 
@@ -591,6 +657,11 @@ def main():
     if dialog.exec_() != QtWidgets.QDialog.Accepted:
         sys.exit(0)
     selected_stage = dialog.selected_stage()
+    should_transition = False
+    if "All" in selected_stage:
+        selected_stage = "S1"  # Start from S1 if All is selected
+        should_transition = True
+
 
     # Now instantiate ArduinoControlApp with the correct stage
     if args.from_config_file and os.path.exists(args.from_config_file):
@@ -601,12 +672,12 @@ def main():
         window = ArduinoControlApp(str(config_path), experiment_folder=str(Path(args.from_config_file).parent),
                                    with_neopixels=params['with_neopixels'],
                                    n_trials=params['n_trials'], inter_trial_interval=params['inter_trial_interval_ms'],
-                                   stage=selected_stage)
+                                   stage=selected_stage, transition=should_transition)
     else:
         window = ArduinoControlApp(str(config_path), experiment_folder='',
                                    with_neopixels=args.with_neopixels,
                                    n_trials=args.n_trials, inter_trial_interval=args.inter_trial_interval,
-                                   stage=selected_stage)
+                                   stage=selected_stage, transition=should_transition)
 
     window.stage_combobox.setCurrentText(selected_stage)
     window.refresh_ports()
