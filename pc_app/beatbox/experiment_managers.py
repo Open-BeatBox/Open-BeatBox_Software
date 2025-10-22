@@ -19,20 +19,90 @@ from __future__ import annotations
 
 import warnings
 import logging
+import csv
+import time
 from abc import ABCMeta
 from pathlib import Path
 from enum import Enum, auto
 from dataclasses import dataclass, field
-from typing import Callable, Any, Mapping, List, Final, Union, final
+from datetime import datetime
+from typing import Callable, Any, Mapping, List, Final, Union, final, Dict, Optional
 
 from configobj import ConfigObj
+from configobj.validate import Validator
 from qtpy import QtCore, QtWidgets
 
 from beatbox.serial_com import BeatBoxCommunicator, SetPayloadOutputBus
 from beatbox.utils import PinConfig, load_pin_config
-
+from beatbox.validators import list_w_choice
 
 ANY_PIN: Final = object()
+
+class SConfig:
+    s_level: str = 'S0'
+
+    def __init__(self, folder=Path(__file__).parent):
+        self.folder = folder
+        self.attributes: List[str] = self._collect_attributes()
+        self._config: Optional[ConfigObj] = None
+        self.validator = Validator(functions={'list_w_choice': list_w_choice})
+
+    def _collect_attributes(self) -> List[str]:
+        all_annotations = {}
+        subclass_annotations = {}
+
+        for cls in reversed(self.__class__.__mro__):
+            annotations = getattr(cls, '__annotations__', {})
+            all_annotations.update(annotations)
+            if cls is self.__class__:
+                subclass_annotations = annotations  # the most specific subclass
+
+        return list(subclass_annotations.keys())
+
+    def load(self):
+        self._config = ConfigObj(str(self.cfg_path), encoding='utf-8',  # WARNING: defaults in spec !!
+                                 configspec=str(self._spec_path), unrepr=True)
+
+        self._validate()
+
+        for attr in self.attributes:
+            # Set specific stage attributes
+            if self.s_level in self._config and attr in self._config[self.s_level]:
+                setattr(self, attr, self._config[self.s_level][attr])
+
+            # if not redefined in the spec, look for global value
+            elif attr in self._config:
+                setattr(self, attr, self._config[attr])
+
+    def _validate(self):
+        # Validate the config
+        results = self._config.validate(self.validator, preserve_errors=True, copy=True)
+        errors = []
+        if results is not True:
+            errors = {key: value for key, value in results.items() if value is not True}
+            raise ValueError(f"Config validation failed. {errors}")
+
+    @property
+    def cfg_path(self) -> Path:
+        return Path(self.folder) / 'config' / 'experiment.cfg'
+
+    @property
+    def _spec_path(self) -> Path:
+        # return Path('~/.beatbox').expanduser() / 'config_specs' / f'{self.s_level}.config.spec'
+        return Path(__file__).parent / 'config_specs' / f'{self.s_level}.config.spec'
+
+    def write(self):
+        self._config.write()
+
+    def set(self, attribute, value):
+        # Set attribute and update config object
+        if self._config is not None:
+            if self.s_level in self._config and attribute in self._config[self.s_level]:
+                self._config[self.s_level][attribute] = value
+            elif attribute in self._config:
+                self._config[attribute] = value
+        setattr(self, attribute, value)
+
 
 class Edge(Enum):
     RISING  = 'rising'
@@ -108,7 +178,6 @@ class PhaseSpec:
             return
         self.timeout_ms = value
 
-
 # Grab the actual Qt metaclass that PyQt uses
 QtMeta = type(QtCore.QObject)
 
@@ -136,9 +205,9 @@ class BaseExperimentManager(QtCore.QObject, metaclass=QABCMeta):
     trialStarted = QtCore.Signal(int)  # WARNING: unbound
     nextTrialRequested = QtCore.Signal()
 
+    stageEnded = QtCore.Signal(str)  # stage name
 
     def __init__(self, experiment_folder: str | Path, communicator: BeatBoxCommunicator,
-                 n_trials: int = 20, inter_trial_interval: int = 10000,
                  main_window: QtWidgets.QMainWindow = None,
                  actuator_pins_cfg: PinConfig = None,
                  auto_start: bool = False):
@@ -152,22 +221,22 @@ class BaseExperimentManager(QtCore.QObject, metaclass=QABCMeta):
 
         self._out_word = self.actuator_pins_cfg.default_word()
 
-        self.experiment_folder = experiment_folder
-        self.n_trials = n_trials
-        self.inter_trial_interval = inter_trial_interval
-        self.reward_duration = 150  # time reward pin stays high in ms  # TODO: parametrize
         self.main_window = main_window
+        self.experiment_folder = experiment_folder
+        self._last_state_value = 0
+        self.reward_duration = 150  # time reward pin stays high in ms  # TODO: parametrize
+        self.trial_no = 0
         self.waiting_for_pellet_delivery = False
         self.pellet_delivered = False
-        self.n_pellets_retrieved = 0
+        self.n_pellets_retrieved = 0 # also the current trial number
         self.waiting_for_pellet_retrieval = False  # whether the manager is waiting for a pellet to be retrieved
-        self.last_pellet_retrieved = False
-        self.config = ConfigObj()  # will be set in set_experiment_folder()
+        # the config Dictionary read from the config file
+        self.config = SConfig()  # will be set in set_experiment_folder()
         if experiment_folder:
             self.set_experiment_folder(experiment_folder)
 
         self.logger = None
-
+        self.csv_logger = None
         # Use the bus to aggregate payloads within a small time window (merge_ms) and send them to the hardware.
         self.bus = SetPayloadOutputBus(merge_ms=5, parent=self)
         self.setPayloadReady.connect(self.bus.post)
@@ -196,25 +265,30 @@ class BaseExperimentManager(QtCore.QObject, metaclass=QABCMeta):
             self._timer.stop() # No need to reset counter as timer.start(timeout_ms) will do it
         self._phase_iti() # reset to a known state
         self.log(logging.INFO, 'Experiment ended.')
+        if hasattr(self, 'logger') and isinstance(self.logger, ExperimentCSVLogger):
+            self.logger.close()
 
-    def _setup_file_logging(self):
-        log_dir = Path(self.experiment_folder)
-        log_path = log_dir / 'experiment_status.csv'
-
+    def _setup_logging(self):
         self.logger = logging.getLogger(f'ExperimentManagerS{self.stage_number}')
         self.logger.setLevel(logging.INFO)
+        self.propagate=True
 
-        file_handler = logging.FileHandler(log_path)
-        file_handler.setLevel(logging.INFO)
-        formatter = logging.Formatter('%(asctime)s; %(levelname)s; %(message)s')
-        file_handler.setFormatter(formatter)
+    def _setup_file_logging(self):
+        # Use ExperimentCSVLogger for robust CSV logging
+        self.csv_logger = ExperimentCSVLogger(
+            experiment_folder=self.experiment_folder,
+            stage_number=self.stage_number,
+            sensor_pin_names=self.sensors_pins_config.pin_names
+        )
 
-        self.logger.addHandler(file_handler)
-        self.logger.propagate = True
 
     def log(self, level, message):
+        """ Basic method to log a message with the given level.
+        This method can be overridden in subclasses to implement custom logging behavior.
+        """
         if self.logger:
             self.logger.log(level, message)
+
 
     # ##################################  STATE MACHINE  ##################################
 
@@ -226,14 +300,13 @@ class BaseExperimentManager(QtCore.QObject, metaclass=QABCMeta):
                           "Please define it in the subclass to start the state machine.")
 
     def start_state_machine(self):
-        # IMPROVEMENT: differentiate starting the state machine experiment initialization
+        # IMPROVEMENT: differentiate starting the state machine and experiment initialization
         if not self._phase_table:
             raise ValueError("Phase table is not defined.")
         for phase, spec in self._phase_table.items():
             if spec.timeout_ms is None and spec.decide is None:
                 raise ValueError(f"Phase {phase} of {self.__class__.__name__} has neither timeout nor decide function. "
                                  f"This would create a deadlock and is therefore prohibited.")
-        self.trial_no = 0
         self.log(logging.INFO, f"Starting state machine for {self.__class__.__name__} with {self._phase_table_initial}")
         self._goto(self._phase_table_initial)
 
@@ -345,22 +418,20 @@ class BaseExperimentManager(QtCore.QObject, metaclass=QABCMeta):
 
     @QtCore.Slot(int)
     def _on_state_value(self, state_word: int):
-        """
-        Decode MCU state; subclasses override *only* what changes.
-        """
-        state_value = state_word & 0xFF  # ignore upper byte
-        # state_value = (state_word[0] << 8) | state_word[1]  # Decode the payload into a single integer.
-        sensor_bits = [(state_value >> i) & 0x01
-                       for i in range(len(self.sensors_pins_config.pin_names))]
+        state_value = state_word & 0xFF
+        self._last_state_value = state_value  # Store for logging
+        sensor_bits = self._get_sensor_bits_from_state_value(state_value)
         self.sensorsStateChanged.emit(sensor_bits)
-        # TODO: parametrize logging level with config file
-        self.log(logging.INFO, f'State value: {state_value:#04x} ({state_value:03d}); state bits, {", ".join(str(bit) for bit in sensor_bits)}')
-
+        # self.log(logging.INFO, f'State value: {state_value:#04x} ({state_value:03d}); state bits, {", ".join(str(bit) for bit in sensor_bits)}', state_bits=sensor_bits)
         changed_pins = {pin_name: bool(pin_on) for pin_name, pin_on in zip(self.sensors_pins_config.pin_names, sensor_bits)
                         if bool(pin_on) != self.sensors_pins_config._current_states[pin_name]}
-        self.log(logging.DEBUG, f'Changed pins: {changed_pins}')
+        self.log(logging.DEBUG, f'Changed pins: {changed_pins}', state_bits=sensor_bits)
         for pin_name, bit_state in changed_pins.items():
             self._handle_input_pin_changed(pin_name, bit_state)
+
+    def _get_sensor_bits_from_state_value(self, state_value: int) -> list[int]:
+        sensor_bits = [(state_value >> i) & 0x01 for i in range(len(self.sensors_pins_config.pin_names))]
+        return sensor_bits
 
     def _handle_input_pin_changed(self, pin_name: str, bit: bool):
         """
@@ -397,18 +468,21 @@ class BaseExperimentManager(QtCore.QObject, metaclass=QABCMeta):
                 else:
                     return
 
+    def set_experiment_folder(self, experiment_folder):
+        """
+        Set the experiment folder for logging and load the configuration.
+        This method should be overridden in subclasses to handle specific configurations.
+        """
+
+        self.experiment_folder = experiment_folder
+        Path(experiment_folder).mkdir(parents=True, exist_ok=True)
+        Path(experiment_folder).joinpath('config').mkdir(parents=True, exist_ok=True)
+
     # ############################ TEMPLATE METHODS ############################
     def _dispatch_changed_pin(self, pin_name: str, edge: Edge):
         """
         Dispatch a changed pin event along with the edge, i.e. the direction of the change.
         This method should be overridden in subclasses to handle specific pin changes.
-        """
-        raise NotImplementedError("Subclasses must implement this method.")
-
-    def set_experiment_folder(self, experiment_folder):
-        """
-        Set the experiment folder and load the configuration.
-        This method should be overridden in subclasses to handle specific configurations.
         """
         raise NotImplementedError("Subclasses must implement this method.")
 
@@ -422,24 +496,32 @@ class BaseExperimentManager(QtCore.QObject, metaclass=QABCMeta):
     def handle_n_trials_changed(self, value):...
     def handle_inter_trial_interval_changed(self, value): ...
 
-    def _read_or_write_config(self, key: str, attribute: str = ''):
-        """
-        Read or write a configuration value for the experiment.
+class ExperimentCSVLogger:
+    def __init__(self, experiment_folder, stage_number, sensor_pin_names):
+        self.start_time = time.time()
+        timestamp = datetime.now().strftime("%d%m%y_%H%M%S")
+        log_filename = f"S{stage_number}_{timestamp}.csv"
+        self.file_path = Path(experiment_folder) / log_filename
+        self.sensor_pin_names = sensor_pin_names
+        self.file = open(self.file_path, "w", newline="")
+        self.writer = csv.writer(self.file)
+        header = [
+            "timestamp_s", "stage", "log_level", "message",
+            "correct_side", "total_trials", "trial_number", "corrective_loop",
+            "left_performance", "right_performance"
+        ] + [f"state_{name}" for name in sensor_pin_names]
+        self.writer.writerow(header)
 
-        If the key exists in the config, set the attribute to its value.
-        If the key does not exist, set the config value to the attribute's value.
+    def log(self, stage, log_level, message, total_trials, trial_number, correct_side,
+            corrective_loop, left_performance, right_performance, state_bits):
+        timestamp_s = f"{(time.time() - self.start_time):.3f}"
+        row = [
+            timestamp_s, stage, log_level, message,
+            correct_side, total_trials, trial_number, corrective_loop,
+            left_performance, right_performance
+        ] + list(state_bits)
+        self.writer.writerow(row)
+        self.file.flush()
 
-        Parameters
-        ----------
-        key : str
-            The key in the configuration dictionary.
-        attribute : str
-            The attribute name to set or get the value from.
-            If not provided, it is assumed to be the same as the key.
-        """
-        if not attribute:
-            attribute = key
-        if val:= self.config.get(key):
-            setattr(self, attribute, val)
-        else:
-            self.config[key] = getattr(self, attribute)
+    def close(self):
+        self.file.close()

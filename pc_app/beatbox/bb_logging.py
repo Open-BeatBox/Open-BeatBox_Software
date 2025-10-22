@@ -25,8 +25,8 @@ class QtHandler(logging.Handler, QObject):
 
 # Configure the root logger
 logger = logging.getLogger()
-#logger.setLevel(logging.DEBUG)
-logger.setLevel(logging.INFO)
+logger.setLevel(logging.DEBUG)
+#logger.setLevel(logging.INFO)
 
 # Console handler (or file handler)
 console_handler = logging.StreamHandler(sys.stdout)
