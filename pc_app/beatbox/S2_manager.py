@@ -239,7 +239,8 @@ class BeatBoxExperimentManagerS2(BeatBoxExperimentManagerS1):
         self.correctiveLoopUpdated.emit(0)
         # Emit trial numbers
         current_trial_number = self.count_responses(response_type='trial', previous=True)
-        total_trials = self.count_responses(previous=True)  # all responses
+        corrective_loops = self.count_responses(result='incorrect', previous=False)
+        total_trials = self.count_responses(previous=True) + corrective_loops # all responses
         self.trialNumbersUpdated.emit(current_trial_number, total_trials)
 
     def _handle_incorrect_response(self):
@@ -247,7 +248,7 @@ class BeatBoxExperimentManagerS2(BeatBoxExperimentManagerS1):
         self._handle_screen_touch()
         self._flash_error()
         # Update corrective loop count for GUI (count corrective_loop responses in current trial)
-        corrective_loops = self.count_responses(response_type='incorrect', previous=False)
+        corrective_loops = self.count_responses(result='incorrect', previous=False)
         self.correctiveLoopUpdated.emit(corrective_loops)  # +1 for the current one
         total_trials = self.count_responses(previous=True) + corrective_loops  # all responses
         self.trialNumbersUpdated.emit(self.count_responses(response_type='trial', previous=True), total_trials)

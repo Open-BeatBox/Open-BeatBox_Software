@@ -22,8 +22,9 @@ from qtpy import QtWidgets, QtCore, QtGui
 import qdarkstyle
 
 from beatbox.bb_logging import qt_handler, logger
-from beatbox.S2_manager import BeatBoxExperimentManagerS2
 from beatbox.S1_manager import BeatBoxExperimentManagerS1
+from beatbox.S2_manager import BeatBoxExperimentManagerS2
+from beatbox.S3_manager import BeatBoxExperimentManagerS3
 
 from beatbox.qt_utils import LEDIndicator
 from beatbox.serial_com import get_platform_serial_ports, BeatBoxCommunicator, BeatBoxMessage, HandshakeWorker
@@ -53,6 +54,8 @@ class ArduinoControlApp(QtWidgets.QMainWindow):
             self.experiment_manager = BeatBoxExperimentManagerS1(experiment_folder, self.communicator, main_window=self)
         elif stage == 'S2':
             self.experiment_manager = BeatBoxExperimentManagerS2(experiment_folder, self.communicator, main_window=self)
+        elif stage == 'S3':
+            self.experiment_manager = BeatBoxExperimentManagerS3(experiment_folder, self.communicator, main_window=self)
         else:
             raise ValueError(f"Unknown stage: {stage}")
         self.connect_signal_from_experiment_manager()
@@ -134,11 +137,6 @@ class ArduinoControlApp(QtWidgets.QMainWindow):
         self.experiment_button = QtWidgets.QPushButton("Select Folder")
         self.experiment_button.clicked.connect(self.select_experiment_folder)
         overall_experiment_layout.addWidget(self.experiment_button)
-
-        # Experiment stage selection
-        self.stage_combobox = QtWidgets.QComboBox()
-        self.stage_combobox.setMinimumWidth(100)
-        self.stage_combobox.addItems(['S1', 'S2', 'S3'])
 
         # Controls for n_trials and inter_trial_interval
         self.n_trials_spinbox = QtWidgets.QSpinBox()
@@ -277,7 +275,7 @@ class ArduinoControlApp(QtWidgets.QMainWindow):
         return s1_data_group
 
     def _ui_setup_s2_controller(self):
-        s2_experiment_group = QtWidgets.QGroupBox("S2 setup")
+        s2_experiment_group = QtWidgets.QGroupBox("S2/S3 setup")
         s2_layout = QtWidgets.QHBoxLayout(s2_experiment_group)
 
         # Error flash duration
@@ -285,7 +283,7 @@ class ArduinoControlApp(QtWidgets.QMainWindow):
         self.error_flash_spinbox.setRange(1, 999999)
         self.error_flash_spinbox.setValue(
             self.experiment_manager.config.error_flash_ms)
-        s2_layout.addWidget(QtWidgets.QLabel("Error Flash (ms):"))
+        s2_layout.addWidget(QtWidgets.QLabel("Blink duration (ms):"))
         s2_layout.addWidget(self.error_flash_spinbox)
 
         # Learning threshold
@@ -418,6 +416,7 @@ class ArduinoControlApp(QtWidgets.QMainWindow):
                 # FIXME: writing in the same CSV file would make more sense
                 self.experiment_manager.set_experiment_folder(s1_folder)  # initiate new logging
                 self._ui_update_s1_to_s2()
+                self._ui_update_base_experiment_params()
                 self.connect_signal_from_experiment_manager()
                 self.experiment_manager.link_widgets()
                 self.experiment_manager.start_experiment()
@@ -428,6 +427,19 @@ class ArduinoControlApp(QtWidgets.QMainWindow):
                     logging.INFO
                 )
                 # TODO: implement S3 manager and transition
+                s2_folder = self.experiment_manager.experiment_folder
+                s3_manager = BeatBoxExperimentManagerS3(
+                    s2_folder,
+                    self.communicator,
+                    main_window=self
+                )
+                self.experiment_manager.deleteLater()
+                self.experiment_manager = s3_manager
+                self.experiment_manager.set_experiment_folder(s2_folder)  # initiate new logging
+                self._ui_update_base_experiment_params()
+                self.connect_signal_from_experiment_manager()
+                self.experiment_manager.link_widgets()
+                self.experiment_manager.start_experiment()
             case _:
                 QtWidgets.QMessageBox.information(
                     self, f"Stage {self.experiment_manager.config.s_level} Complete",
@@ -585,6 +597,15 @@ class ArduinoControlApp(QtWidgets.QMainWindow):
         for idx, pin_name in enumerate(self.actuators_indicators):
             self.actuators_indicators[pin_name].set_state(bool((word >> idx) & 1))
 
+    def _ui_update_base_experiment_params(self):
+        # Update base info widgets from the new manager's config
+        self.n_trials_spinbox.setValue(self.experiment_manager.config.n_trials)
+        self.inter_trial_spinbox.setValue(self.experiment_manager.config.inter_trial_interval)
+
+        if self.experiment_manager.stage_number >= 2:
+            self.error_flash_spinbox.setValue(self.experiment_manager.config.error_flash_ms)
+            self.learning_threshold_spinbox.setValue(self.experiment_manager.config.learning_threshold)
+
     def _update_performance(self, left_performance: float, right_performance: float):
         self.left_value_label.setText(f"{left_performance:.2f}")
         self.right_value_label.setText(f"{right_performance:.2f}")
@@ -616,7 +637,7 @@ class StageSelectDialog(QtWidgets.QDialog):
         self.setWindowTitle("Select Experiment Stage")
         layout = QtWidgets.QVBoxLayout(self)
         self.combo = QtWidgets.QComboBox()
-        self.combo.addItems(["All", "S1", "S2"]) # FIXME: maybe use enum for stages instead
+        self.combo.addItems(["All", "S1", "S2", "S3"]) # FIXME: maybe use enum for stages instead
         layout.addWidget(QtWidgets.QLabel("Choose experiment stage:"))
         layout.addWidget(self.combo)
         btn = QtWidgets.QPushButton("OK")
@@ -679,7 +700,6 @@ def main():
                                    n_trials=args.n_trials, inter_trial_interval=args.inter_trial_interval,
                                    stage=selected_stage, transition=should_transition)
 
-    window.stage_combobox.setCurrentText(selected_stage)
     window.refresh_ports()
     window.show()
     sys.exit(app.exec_())

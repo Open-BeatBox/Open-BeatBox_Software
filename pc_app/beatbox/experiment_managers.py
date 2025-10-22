@@ -95,6 +95,12 @@ class SConfig:
         self._config.write()
 
     def set(self, attribute, value):
+        # Set attribute and update config object
+        if self._config is not None:
+            if self.s_level in self._config and attribute in self._config[self.s_level]:
+                self._config[self.s_level][attribute] = value
+            elif attribute in self._config:
+                self._config[attribute] = value
         setattr(self, attribute, value)
 
 
