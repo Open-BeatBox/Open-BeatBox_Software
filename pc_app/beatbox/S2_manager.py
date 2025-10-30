@@ -77,7 +77,8 @@ class BeatBoxExperimentManagerS2(BeatBoxExperimentManagerS1):
                 on_enter=self._phase_wait_tunnel,
                 routes={True: Phase.SHOW_STIM},
                 decide=lambda instance: instance.tunnel_entered,  # bool attr set by handle_tunnel_crossing_in()
-                relevant_pins={'right_tunnel_crossing': Edge.FALLING}
+                relevant_pins={'left_tunnel_crossing': Edge.FALLING,
+                               'right_tunnel_crossing': Edge.FALLING}
             ),
             Phase.SHOW_STIM: PhaseSpec(
                 on_enter=self._phase_show_stim,
@@ -299,7 +300,7 @@ class BeatBoxExperimentManagerS2(BeatBoxExperimentManagerS1):
                     case Edge.BOTH:
                         return
             case 'left_tunnel_crossing':
-                self.handle_tunnel_crossing_in()
+                self.handle_tunnel_crossing_out()
             case 'right_tunnel_crossing':
                 self.handle_tunnel_crossing_out()
             case 'left_response' | 'right_response':
