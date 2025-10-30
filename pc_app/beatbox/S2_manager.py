@@ -399,14 +399,15 @@ class BeatBoxExperimentManagerS2(BeatBoxExperimentManagerS1):
         BaseExperimentManager.log(self, level, message)
         state_bits = state_bits if state_bits is not None else self._get_sensor_bits_from_state_value(self._last_state_value)
         if self.csv_logger:
+            total_trials = self.count_responses() + self.count_responses(previous=False)
             self.csv_logger.log(
                 stage=self.stage_number,
                 log_level=logging.getLevelName(level),
                 message=message,
-                total_trials=self.count_responses(),
+                total_trials=total_trials,
                 trial_number=self.count_responses(response_type='trial') + 1,  # +1 for current trial
                 correct_side=self.get_screen_side(),
-                corrective_loop=self.count_responses(result='incorrect', response_type='corrective_loop', previous=False),
+                corrective_loop=self.count_responses(result='incorrect', previous=False),
                 left_performance=self.get_left_performance(),
                 right_performance=self.get_right_performance(),
                 state_bits=state_bits
