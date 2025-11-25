@@ -7,7 +7,7 @@ from typing import Dict, Any, List, Optional
 from configobj import ConfigObj
 from qtpy import QtWidgets, QtCore
 
-from beatbox.experiment_managers import BaseExperimentManager, Phase, PhaseSpec, Edge, SConfig
+from beatbox.experiment_managers import BaseExperimentManager, Phase, PhaseSpec, Edge, SConfig, SubjectInfo
 from beatbox.utils import PinConfig
 
 class S1Config(SConfig):
@@ -32,8 +32,9 @@ class BeatBoxExperimentManagerS1(BaseExperimentManager):
     trialNumbersUpdated = QtCore.Signal(int, int)
 
     def __init__(self, experiment_folder, communicator,
-                 main_window=None, actuator_pins_cfg: PinConfig = None):
-        super().__init__(experiment_folder, communicator, main_window, actuator_pins_cfg)
+                 main_window=None, actuator_pins_cfg: PinConfig = None,
+                 subject_info: SubjectInfo = None):
+        super().__init__(experiment_folder, communicator, main_window, actuator_pins_cfg, subject_info=subject_info)
         self.config = S1Config(Path(__file__).parent)
         self.config.load()
 
@@ -169,7 +170,10 @@ class BeatBoxExperimentManagerS1(BaseExperimentManager):
         self.experiment_folder = experiment_folder
         Path(experiment_folder).mkdir(parents=True, exist_ok=True)
         self._setup_logging()
-        self._setup_file_logging()
+        if self.config.s_level == 'S1':
+            self._setup_file_logging(with_light_logger=False)
+        else:
+            self._setup_file_logging(with_light_logger=True)
 
     def log(self, level: int, message: str, state_bits: Optional[Dict[str, Any]] = None):
         BaseExperimentManager.log(self, level, message)

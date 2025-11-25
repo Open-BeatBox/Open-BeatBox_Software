@@ -22,6 +22,7 @@ from qtpy import QtWidgets, QtCore, QtGui
 import qdarkstyle
 
 from beatbox.bb_logging import qt_handler, logger
+from beatbox.experiment_managers import SubjectInfo
 from beatbox.S1_manager import BeatBoxExperimentManagerS1
 from beatbox.S2_manager import BeatBoxExperimentManagerS2
 from beatbox.S3_manager import BeatBoxExperimentManagerS3
@@ -35,9 +36,8 @@ SERIAL_TIMEOUT = 60 #2  # FIXME: change back to 2
 BAUD_RATE = 115200
 
 class ArduinoControlApp(QtWidgets.QMainWindow):
-    def __init__(self, pins_config_file, experiment_folder='',
-                 with_neopixels=False, n_trials=20, inter_trial_interval=10000, stage='S1',
-                 transition=False):
+    def __init__(self, pins_config_file, experiment_folder='', with_neopixels=False, n_trials=20,
+                 inter_trial_interval=10000, stage='S1', transition=False, subject_info=None):
         super().__init__()
 
         # First instantiate QtObjects needed by communicator
@@ -50,14 +50,16 @@ class ArduinoControlApp(QtWidgets.QMainWindow):
         self.communicator.errorOccurred.connect(self.on_error)
 
         self.with_neopixels = with_neopixels
-        if stage == 'S1':
-            self.experiment_manager = BeatBoxExperimentManagerS1(experiment_folder, self.communicator, main_window=self)
-        elif stage == 'S2':
-            self.experiment_manager = BeatBoxExperimentManagerS2(experiment_folder, self.communicator, main_window=self)
-        elif stage == 'S3':
-            self.experiment_manager = BeatBoxExperimentManagerS3(experiment_folder, self.communicator, main_window=self)
+        manager_classes = {
+            'S1': BeatBoxExperimentManagerS1,
+            'S2': BeatBoxExperimentManagerS2,
+            'S3': BeatBoxExperimentManagerS3
+        }
+        if stage in manager_classes:
+            self.experiment_manager = manager_classes[stage](experiment_folder, self.communicator, main_window=self, subject_info=subject_info)
         else:
             raise ValueError(f"Unknown stage: {stage}")
+        self.subject_info = subject_info # store for later stages
         self.connect_signal_from_experiment_manager()
         self.enable_transitions = transition
 
@@ -92,6 +94,10 @@ class ArduinoControlApp(QtWidgets.QMainWindow):
         self._handshake_worker = HandshakeWorker(self.communicator)
 
         self._connect_progress = None
+
+        # Flags for connection and folder selection
+        self._serial_connected = False
+        self._folder_selected = False
 
     def connect_signal_from_experiment_manager(self):
         self.experiment_manager.sensorsStateChanged.connect(self._paint_sensor_leds)
@@ -372,12 +378,17 @@ class ArduinoControlApp(QtWidgets.QMainWindow):
         folder = QtWidgets.QFileDialog.getExistingDirectory(self, "Select Experiment Folder")
         if folder:
             self.experiment_manager.set_experiment_folder(folder)
+            self._folder_selected = True
+            self._update_experiment_state_btn()
 
     def closeEvent(self, event):
         """
         Triggers when window is closed.
         Ensure the communicator shuts down cleanly.
         """
+        self._serial_connected = False
+        self._folder_selected = False
+        self.experiment_state_btn.setEnabled(False)
         self.communicator.close()
         super().closeEvent(event)
 
@@ -393,6 +404,7 @@ class ArduinoControlApp(QtWidgets.QMainWindow):
         self.experiment_state_btn.setText("Start Experiment")
         self.experiment_state_btn.clicked.disconnect(self.stop_experiment)
         self.experiment_state_btn.clicked.connect(self.start_experiment)
+        self.experiment_state_btn.setEnabled(self._serial_connected and self._folder_selected)
         logger.debug("Stopping experiment.")
 
     def handle_stage_end(self, reason: str):
@@ -409,12 +421,11 @@ class ArduinoControlApp(QtWidgets.QMainWindow):
                 s2_manager = BeatBoxExperimentManagerS2(
                     s1_folder,
                     self.communicator,
-                    main_window=self
+                    main_window=self,
+                    subject_info=self.subject_info
                 )
                 self.experiment_manager.deleteLater()
                 self.experiment_manager = s2_manager
-                # FIXME: writing in the same CSV file would make more sense
-                self.experiment_manager.set_experiment_folder(s1_folder)  # initiate new logging
                 self._ui_update_s1_to_s2()
                 self._ui_update_base_experiment_params()
                 self.connect_signal_from_experiment_manager()
@@ -426,16 +437,15 @@ class ArduinoControlApp(QtWidgets.QMainWindow):
                     "Stage S2 complete. Moving to Stage S3.",
                     logging.INFO
                 )
-                # TODO: implement S3 manager and transition
                 s2_folder = self.experiment_manager.experiment_folder
                 s3_manager = BeatBoxExperimentManagerS3(
                     s2_folder,
                     self.communicator,
-                    main_window=self
+                    main_window=self,
+                    subject_info=self.subject_info
                 )
                 self.experiment_manager.deleteLater()
                 self.experiment_manager = s3_manager
-                self.experiment_manager.set_experiment_folder(s2_folder)  # initiate new logging
                 self._ui_update_base_experiment_params()
                 self.connect_signal_from_experiment_manager()
                 self.experiment_manager.link_widgets()
@@ -552,9 +562,9 @@ class ArduinoControlApp(QtWidgets.QMainWindow):
 
     def on_handshake(self):
         self.append_log('Handshake completed.', logging.INFO)
-        # Now we can start experiments
-        self.experiment_state_btn.setEnabled(True)
+        self._serial_connected = True
         # Set screen to default state
+        self._update_experiment_state_btn()
         self.experiment_manager.handshake_completed()
 
     def send_set_command(self, checked_pins=None):
@@ -617,6 +627,9 @@ class ArduinoControlApp(QtWidgets.QMainWindow):
         self.current_trial_value_label.setText(str(current_trial_number))
         self.total_trials_value_label.setText(str(total_trials))
 
+    def _update_experiment_state_btn(self):
+        self.experiment_state_btn.setEnabled(self._serial_connected and self._folder_selected)
+
     def on_error(self, msg: BeatBoxMessage | str):
         err = msg.payload if isinstance(msg, BeatBoxMessage) else msg
         self.append_log(f'Error: {err}', logging.ERROR)
@@ -640,12 +653,50 @@ class StageSelectDialog(QtWidgets.QDialog):
         self.combo.addItems(["All", "S1", "S2", "S3"]) # FIXME: maybe use enum for stages instead
         layout.addWidget(QtWidgets.QLabel("Choose experiment stage:"))
         layout.addWidget(self.combo)
+        # Animal info fields
+        self.animal_name_edit = QtWidgets.QLineEdit()
+        layout.addWidget(QtWidgets.QLabel("Animal name:"))
+        layout.addWidget(self.animal_name_edit)
+        self.weight_edit = QtWidgets.QLineEdit()
+        layout.addWidget(QtWidgets.QLabel("Weight (g):"))
+        layout.addWidget(self.weight_edit)
+        self.box_edit = QtWidgets.QLineEdit()
+        layout.addWidget(QtWidgets.QLabel("Box:"))
+        layout.addWidget(self.box_edit)
+        self.sex_combo = QtWidgets.QComboBox()
+        self.sex_combo.addItems(["X", "Male", "Female"])  # Default unset at X
+        layout.addWidget(QtWidgets.QLabel("Sex:"))
+        layout.addWidget(self.sex_combo)
+        self.light_cycle_combo = QtWidgets.QComboBox()
+        self.light_cycle_combo.addItems(["X", "Red", "White"])  # Default unset at X
+        layout.addWidget(QtWidgets.QLabel("Light cycle:"))
+        layout.addWidget(self.light_cycle_combo)
+
         btn = QtWidgets.QPushButton("OK")
         btn.clicked.connect(self.accept)
         layout.addWidget(btn)
 
+    def get_subject_info(self):
+        return SubjectInfo(
+            subject_id=self.animal_name(),
+            weight=self.weight(),
+            box=self.box(),
+            sex=self.sex(),
+            light_cycle=self.light_cycle()
+        )
+
     def selected_stage(self):
         return self.combo.currentText()
+    def animal_name(self):
+        return self.animal_name_edit.text()
+    def weight(self):
+        return self.weight_edit.text()
+    def box(self):
+        return self.box_edit.text()
+    def sex(self):
+        return self.sex_combo.currentText()
+    def light_cycle(self):
+        return self.light_cycle_combo.currentText()
 
 def main():
 
@@ -693,12 +744,11 @@ def main():
         window = ArduinoControlApp(str(config_path), experiment_folder=str(Path(args.from_config_file).parent),
                                    with_neopixels=params['with_neopixels'],
                                    n_trials=params['n_trials'], inter_trial_interval=params['inter_trial_interval_ms'],
-                                   stage=selected_stage, transition=should_transition)
+                                   stage=selected_stage, transition=should_transition, subject_info=dialog.get_subject_info())
     else:
-        window = ArduinoControlApp(str(config_path), experiment_folder='',
-                                   with_neopixels=args.with_neopixels,
+        window = ArduinoControlApp(str(config_path), experiment_folder='', with_neopixels=args.with_neopixels,
                                    n_trials=args.n_trials, inter_trial_interval=args.inter_trial_interval,
-                                   stage=selected_stage, transition=should_transition)
+                                   stage=selected_stage, transition=should_transition, subject_info=dialog.get_subject_info())
 
     window.refresh_ports()
     window.show()

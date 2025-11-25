@@ -38,6 +38,18 @@ from beatbox.validators import list_w_choice
 
 ANY_PIN: Final = object()
 
+class SubjectInfo:
+    """
+    Class to hold subject information.
+    """
+    def __init__(self, subject_id: str = '', weight: int = 0,
+                 box: str = '', sex: str = '', light_cycle: str = ''):
+        self.subject_id = subject_id
+        self.weight = weight
+        self.box = box
+        self.sex = sex
+        self.light_cycle = light_cycle
+
 class SConfig:
     s_level: str = 'S0'
 
@@ -210,7 +222,7 @@ class BaseExperimentManager(QtCore.QObject, metaclass=QABCMeta):
     def __init__(self, experiment_folder: str | Path, communicator: BeatBoxCommunicator,
                  main_window: QtWidgets.QMainWindow = None,
                  actuator_pins_cfg: PinConfig = None,
-                 auto_start: bool = False):
+                 auto_start: bool = False, subject_info: SubjectInfo = None) -> None:
         QtCore.QObject.__init__(self)
         self.communicator = communicator
         self.communicator.stateValueReceived.connect(self._on_state_value)
@@ -223,6 +235,7 @@ class BaseExperimentManager(QtCore.QObject, metaclass=QABCMeta):
 
         self.main_window = main_window
         self.experiment_folder = experiment_folder
+        self.subject_info = subject_info
         self._last_state_value = 0
         self.reward_duration = 150  # time reward pin stays high in ms  # TODO: parametrize
         self.trial_no = 0
@@ -230,13 +243,16 @@ class BaseExperimentManager(QtCore.QObject, metaclass=QABCMeta):
         self.pellet_delivered = False
         self.n_pellets_retrieved = 0 # also the current trial number
         self.waiting_for_pellet_retrieval = False  # whether the manager is waiting for a pellet to be retrieved
+
         # the config Dictionary read from the config file
         self.config = SConfig()  # will be set in set_experiment_folder()
-        if experiment_folder:
-            self.set_experiment_folder(experiment_folder)
 
         self.logger = None
         self.csv_logger = None
+        self.light_logger = None
+
+        if experiment_folder:
+            self.set_experiment_folder(experiment_folder)
         # Use the bus to aggregate payloads within a small time window (merge_ms) and send them to the hardware.
         self.bus = SetPayloadOutputBus(merge_ms=5, parent=self)
         self.setPayloadReady.connect(self.bus.post)
@@ -257,6 +273,7 @@ class BaseExperimentManager(QtCore.QObject, metaclass=QABCMeta):
         self.emit_payload_ready(self.actuator_pins_cfg.default_mask(), flush=True)
 
     def start_experiment(self):
+        self.log_subject_info()
         self.start_state_machine()
 
     def end_experiment(self):
@@ -273,14 +290,19 @@ class BaseExperimentManager(QtCore.QObject, metaclass=QABCMeta):
         self.logger.setLevel(logging.INFO)
         self.propagate=True
 
-    def _setup_file_logging(self):
-        # Use ExperimentCSVLogger for robust CSV logging
+    def _setup_file_logging(self, with_light_logger: bool = True):
         self.csv_logger = ExperimentCSVLogger(
             experiment_folder=self.experiment_folder,
             stage_number=self.stage_number,
-            sensor_pin_names=self.sensors_pins_config.pin_names
+            sensor_pin_names=self.sensors_pins_config.pin_names,
+            subject_info=self.subject_info
         )
-
+        if with_light_logger:
+            self.light_logger = LightExperimentCSVLogger(
+                experiment_folder=self.experiment_folder,
+                stage_number=self.stage_number,
+                subject_info=self.subject_info
+            )
 
     def log(self, level, message):
         """ Basic method to log a message with the given level.
@@ -289,6 +311,13 @@ class BaseExperimentManager(QtCore.QObject, metaclass=QABCMeta):
         if self.logger:
             self.logger.log(level, message)
 
+    def log_subject_info(self):
+        if self.subject_info is not None:
+            self.log(logging.INFO, f"Subject Info: ID={self.subject_info.subject_id}, "
+                                   f"Weight={self.subject_info.weight}g, "
+                                   f"Box={self.subject_info.box}, "
+                                   f"Sex={self.subject_info.sex}, "
+                                   f"Light Cycle={self.subject_info.light_cycle}")
 
     # ##################################  STATE MACHINE  ##################################
 
@@ -496,17 +525,23 @@ class BaseExperimentManager(QtCore.QObject, metaclass=QABCMeta):
     def handle_n_trials_changed(self, value):...
     def handle_inter_trial_interval_changed(self, value): ...
 
+
+    ############################# CSV loggers #############################
 class ExperimentCSVLogger:
-    def __init__(self, experiment_folder, stage_number, sensor_pin_names):
+    def __init__(self, experiment_folder, stage_number, sensor_pin_names, subject_info=None):
         self.start_time = time.time()
-        timestamp = datetime.now().strftime("%d%m%y_%H%M%S")
-        log_filename = f"S{stage_number}_{timestamp}.csv"
+        self.timestamp = datetime.now().isoformat()
+        if subject_info is not None:
+            subject_id = subject_info.subject_id
+            log_filename = f"FULL_{subject_id}_S{stage_number}_{self.timestamp}.csv"
+        else:
+            log_filename = f"FULL_S{stage_number}_{self.timestamp}.csv"
         self.file_path = Path(experiment_folder) / log_filename
         self.sensor_pin_names = sensor_pin_names
         self.file = open(self.file_path, "w", newline="")
         self.writer = csv.writer(self.file)
         header = [
-            "timestamp_s", "stage", "log_level", "message",
+            "date", "timestamp_s", "stage", "log_level", "message",
             "correct_side", "total_trials", "trial_number", "corrective_loop",
             "left_performance", "right_performance"
         ] + [f"state_{name}" for name in sensor_pin_names]
@@ -515,11 +550,47 @@ class ExperimentCSVLogger:
     def log(self, stage, log_level, message, total_trials, trial_number, correct_side,
             corrective_loop, left_performance, right_performance, state_bits):
         timestamp_s = f"{(time.time() - self.start_time):.3f}"
+        date = datetime.now().isoformat()
         row = [
-            timestamp_s, stage, log_level, message,
+            date, timestamp_s, stage, log_level, message,
             correct_side, total_trials, trial_number, corrective_loop,
             left_performance, right_performance
         ] + list(state_bits)
+        self.writer.writerow(row)
+        self.file.flush()
+
+    def close(self):
+        self.file.close()
+
+class LightExperimentCSVLogger:
+    def __init__(self, experiment_folder, stage_number, subject_info: SubjectInfo = None):
+        self.start_time = time.time()
+        self.timestamp = datetime.now().isoformat()
+        if subject_info is not None:
+            subject_id = subject_info.subject_id
+            log_filename = f"{subject_id}_S{stage_number}_{self.timestamp}.csv"
+        else:
+            log_filename = f"S{stage_number}_{self.timestamp}.csv"
+        self.file_path = Path(experiment_folder) / log_filename
+        self.file = open(self.file_path, "w", newline="")
+        self.writer = csv.writer(self.file)
+        header = [
+            "date", "timestamp_s", "current_trial", "correct_side", "response_side",
+            "reward", "corrective_loop", "perf_left", "perf_right"
+        ]
+        self.writer.writerow(header)
+
+    # Reward is just a bool and should be true when we transition to another trial
+    # call this method at the end of each trial/when there is a response
+    def log(self, trial_number, reward, correct_side, response_side,
+            corrective_loop, left_performance, right_performance):
+        date = datetime.now().isoformat()
+        timestamp_s = f"{(time.time() - self.start_time):.3f}"
+        row = [
+            date, timestamp_s, f"n={trial_number}", correct_side, response_side,
+            reward, corrective_loop,
+            left_performance, right_performance
+        ]
         self.writer.writerow(row)
         self.file.flush()
 

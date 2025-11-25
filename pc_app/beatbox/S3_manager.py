@@ -4,6 +4,7 @@ from pathlib import Path
 from qtpy import QtCore
 
 from beatbox.S2_manager import BeatBoxExperimentManagerS2, S2Config
+from beatbox.experiment_managers import SubjectInfo
 from beatbox.utils import PinConfig
 
 class BeatBoxExperimentManagerS3(BeatBoxExperimentManagerS2):
@@ -14,8 +15,9 @@ class BeatBoxExperimentManagerS3(BeatBoxExperimentManagerS2):
     """
     stage_number = 3
 
-    def __init__(self, experiment_folder, communicator, main_window=None, actuator_pins_cfg: PinConfig = None):
-        super().__init__(experiment_folder, communicator, main_window, actuator_pins_cfg)
+    def __init__(self, experiment_folder, communicator, main_window=None, actuator_pins_cfg: PinConfig = None,
+                 subject_info: SubjectInfo = None):
+        super().__init__(experiment_folder, communicator, main_window, actuator_pins_cfg, subject_info=subject_info)
         # Override config to use S2Config, but load S3-specific values from experiment.cfg
         self.config = S2Config(Path(__file__).parent)
         self.config.s_level = 'S3'  # For experiment.cfg section, but config spec is still S2
