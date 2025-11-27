@@ -218,6 +218,9 @@ class BaseExperimentManager(QtCore.QObject, metaclass=QABCMeta):
     nextTrialRequested = QtCore.Signal()
 
     stageEnded = QtCore.Signal(str)  # stage name
+    phaseChanged = QtCore.Signal(str)  # Emitted with the new phase name
+    stageChanged = QtCore.Signal(str)  # Emitted with the new stage name
+    pelletDeliveryAlert = QtCore.Signal(int) # Emitted with the number of tries for pellet delivery
 
     def __init__(self, experiment_folder: str | Path, communicator: BeatBoxCommunicator,
                  main_window: QtWidgets.QMainWindow = None,
@@ -243,6 +246,7 @@ class BaseExperimentManager(QtCore.QObject, metaclass=QABCMeta):
         self.pellet_delivered = False
         self.n_pellets_retrieved = 0 # also the current trial number
         self.waiting_for_pellet_retrieval = False  # whether the manager is waiting for a pellet to be retrieved
+        self.pellet_delivery_loop_count = 0
 
         # the config Dictionary read from the config file
         self.config = SConfig()  # will be set in set_experiment_folder()
@@ -337,7 +341,9 @@ class BaseExperimentManager(QtCore.QObject, metaclass=QABCMeta):
                 raise ValueError(f"Phase {phase} of {self.__class__.__name__} has neither timeout nor decide function. "
                                  f"This would create a deadlock and is therefore prohibited.")
         self.log(logging.INFO, f"Starting state machine for {self.__class__.__name__} with {self._phase_table_initial}")
+        self.stageChanged.emit(str(self.config.s_level))  # Emit the stage change signal
         self._goto(self._phase_table_initial)
+        self.phaseChanged.emit(str(phase))
 
     @final
     def _goto(self, phase: Phase, *, extra_ms: int = 0):
@@ -356,6 +362,8 @@ class BaseExperimentManager(QtCore.QObject, metaclass=QABCMeta):
         if spec.on_enter is not None:  # Entry action
             #spec.on_enter(self)
             spec.on_enter()
+
+        self.phaseChanged.emit(str(phase))  # Emit the phase change signal
 
     def _on_timeout(self):
         """Handle phase timeout."""

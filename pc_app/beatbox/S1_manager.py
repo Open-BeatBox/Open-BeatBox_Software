@@ -94,6 +94,8 @@ class BeatBoxExperimentManagerS1(BaseExperimentManager):
             self._force_advance_to_wait_pellet()
             return
         self.waiting_for_pellet_delivery = True
+        self.pellet_delivery_loop_count += 1
+        self.pelletDeliveryAlert.emit(self.pellet_delivery_loop_count)
         self._deliver_reward() # also resets screen
 
     # FIXME: this is ugly
@@ -113,8 +115,9 @@ class BeatBoxExperimentManagerS1(BaseExperimentManager):
 
     def _phase_wait_pellet_retrieval(self):
         self.waiting_for_pellet_retrieval = True
-        self.trial_no += 1  #  TODO: check if here or part of handle_pellet_retrieved  # FIXME: part of pellet retrieval
-
+        self.trial_no += 1
+        self.pellet_delivery_loop_count = 0 # reset for next trial
+        self.pelletDeliveryAlert.emit(self.pellet_delivery_loop_count)
         payload = self.actuator_pins_cfg.mask()  # screens off
         self.emit_payload_ready(payload)
         self.trialStarted.emit(self.trial_no)

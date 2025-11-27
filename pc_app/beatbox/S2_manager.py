@@ -3,10 +3,9 @@ from __future__ import annotations
 import logging
 from pathlib import Path
 
-from typing import Dict, Any, List, Optional, get_type_hints
+from typing import Dict, Any, List, Optional
 
-from numpy.ma.core import left_shift
-from qtpy import QtCore, QtWidgets
+from qtpy import QtCore
 
 from beatbox.experiment_managers import SConfig, BaseExperimentManager, SubjectInfo
 
@@ -27,7 +26,7 @@ class S2Config(SConfig):
     right_screen_sequence: List[str]
 
 from beatbox.S1_manager import BeatBoxExperimentManagerS1
-from beatbox.experiment_managers import Phase, PhaseSpec, Edge, SConfig
+from beatbox.experiment_managers import Phase, PhaseSpec, Edge
 from beatbox.utils import PinConfig
 
 class BeatBoxExperimentManagerS2(BeatBoxExperimentManagerS1):
@@ -44,6 +43,7 @@ class BeatBoxExperimentManagerS2(BeatBoxExperimentManagerS1):
 
     performanceUpdated = QtCore.Signal(float, float)
     correctiveLoopUpdated = QtCore.Signal(int)
+    pelletDeliveryAlert = QtCore.Signal(int)  # Signal to alert GUI for blinking, emits loop count
 
 
     def __init__(self, experiment_folder, communicator,
@@ -475,3 +475,14 @@ class BeatBoxExperimentManagerS2(BeatBoxExperimentManagerS1):
         self.config.set('corrective_loop_timeout', value)
         self.config.write()
         self._phase_table[Phase.STOP_FLASH].set_timeout(value)
+
+    def _goto(self, phase: Phase, *, extra_ms: int = 0):
+        super()._goto(phase, extra_ms=extra_ms)
+        if phase == Phase.DELIVER_PELLET:
+            self.pellet_delivery_loop_count += 1
+            if self.pellet_delivery_loop_count > 20:
+                self.pelletDeliveryAlert.emit(self.pellet_delivery_loop_count)
+        else:
+            if self.pellet_delivery_loop_count > 0:
+                self.pellet_delivery_loop_count = 0
+                self.pelletDeliveryAlert.emit(0)

@@ -64,7 +64,7 @@ class ArduinoControlApp(QtWidgets.QMainWindow):
         self.enable_transitions = transition
 
         # UI Elements
-        self.port_combobox = QtWidgets.QComboBox()
+        self.port_combobox = QtWidgets.QComboBox(self)
         self.port_combobox.setMinimumWidth(100)
         self.connect_button = QtWidgets.QPushButton('Connect')
         self.send_button = QtWidgets.QPushButton('Send Set Command')
@@ -110,6 +110,9 @@ class ArduinoControlApp(QtWidgets.QMainWindow):
             self.experiment_manager.performanceUpdated.connect(self._update_performance)
             self.experiment_manager.correctiveLoopUpdated.connect(self._update_corrective_loop)
             self.experiment_manager.trialNumbersUpdated.connect(self._update_trial_numbers)
+        self.experiment_manager.phaseChanged.connect(self._update_phase_label)
+        self.experiment_manager.stageChanged.connect(self._update_stage_label)
+        self.experiment_manager.pelletDeliveryAlert.connect(self._handle_pellet_delivery_alert)
 
     def setup_ui(self):
         """ Set up the main UI layout and widgets. """
@@ -178,8 +181,6 @@ class ArduinoControlApp(QtWidgets.QMainWindow):
 
         ####################################################################
 
-        self.__setup_actuators(main_layout)
-
         # SENSORS
         sensors_group = QtWidgets.QGroupBox('Sensors')
         sensors_layout = QtWidgets.QGridLayout(sensors_group)
@@ -191,14 +192,40 @@ class ArduinoControlApp(QtWidgets.QMainWindow):
             self.sensors_indicators[pin_name] = led
         main_layout.addWidget(sensors_group)
 
-        if self.with_neopixels:
-            self.setup_neopixels_ui(main_layout)
+        # Blinking alert for pellet delivery (now after sensors, before actuators)
+        self.blinking_alert_label = QtWidgets.QLabel()
+        self.blinking_alert_label.setText("")
+        self.blinking_alert_label.setStyleSheet("color: red; font-weight: bold;")
+        self.blinking_alert_label.setAlignment(QtCore.Qt.AlignCenter)
+        main_layout.addWidget(self.blinking_alert_label)
+
+        # Actuators (move after alert)
+        self.__setup_actuators(main_layout)
 
         # Send command button
         self.send_button.clicked.connect(self.send_set_command)
         main_layout.addWidget(self.send_button)
 
         # Logging area
+        # Animal information and stage/phase info section
+        info_row_widget = QtWidgets.QWidget()
+        info_row_layout = QtWidgets.QHBoxLayout(info_row_widget)
+        info_row_layout.setContentsMargins(0, 0, 0, 0)
+        # Left: Animal info
+        animal_info_group = self._create_animal_info_group()
+        info_row_layout.addWidget(animal_info_group)
+        # Right: Stage and phase info
+        stage_phase_group = QtWidgets.QGroupBox("Stage/Phase Info")
+        stage_phase_layout = QtWidgets.QFormLayout(stage_phase_group)
+        self.stage_label = QtWidgets.QLabel(str(self.experiment_manager.config.s_level))
+        self.phase_label = QtWidgets.QLabel("")  # To be updated dynamically
+        self.stage_label.setTextInteractionFlags(QtCore.Qt.TextSelectableByMouse)
+        self.phase_label.setTextInteractionFlags(QtCore.Qt.TextSelectableByMouse)
+        stage_phase_layout.addRow("Current Stage:", self.stage_label)
+        stage_phase_layout.addRow("Current Phase:", self.phase_label)
+        info_row_layout.addWidget(stage_phase_group)
+        main_layout.addWidget(info_row_widget)
+
         main_layout.addWidget(self.log_text)
 
         return main_layout
@@ -643,6 +670,43 @@ class ArduinoControlApp(QtWidgets.QMainWindow):
         formatted = f'<font color="{color}">{message}</font>'
         self.log_text.append(formatted)
 
+    def _create_animal_info_group(self):
+        """Create a group box displaying animal information."""
+        group = QtWidgets.QGroupBox("Animal Information")
+        layout = QtWidgets.QFormLayout(group)
+        # Use subject_info if available, else empty
+        info = self.subject_info if hasattr(self, 'subject_info') and self.subject_info else None
+        self.animal_name_label = QtWidgets.QLabel(info.subject_id if info else "")
+        self.weight_label = QtWidgets.QLabel(str(info.weight) if info else "")
+        self.box_label = QtWidgets.QLabel(info.box if info else "")
+        self.sex_label = QtWidgets.QLabel(info.sex if info else "")
+        self.light_cycle_label = QtWidgets.QLabel(info.light_cycle if info else "")
+        for label in [self.animal_name_label, self.weight_label, self.box_label, self.sex_label, self.light_cycle_label]:
+            label.setTextInteractionFlags(QtCore.Qt.TextSelectableByMouse)
+        layout.addRow("Animal Name:", self.animal_name_label)
+        layout.addRow("Weight (g):", self.weight_label)
+        layout.addRow("Box:", self.box_label)
+        layout.addRow("Sex:", self.sex_label)
+        layout.addRow("Light Cycle:", self.light_cycle_label)
+        return group
+
+    def _update_phase_label(self, phase_name: str):
+        self.phase_label.setText(phase_name)
+
+    def _update_stage_label(self, stage_name: str):
+        self.stage_label.setText(stage_name)
+
+    def show_blinking_alert(self, show: bool):
+        if show:
+            self.blinking_alert_label.setText("⚠️ Pellet delivery loop > 5! Check hardware!")
+        else:
+            self.blinking_alert_label.setText("")
+
+    def _handle_pellet_delivery_alert(self, loop_count: int):
+        if loop_count > 15:
+            self.blinking_alert_label.setText(f"⚠️ Pellet delivery loop: {loop_count}! Check hardware!")
+        else:
+            self.blinking_alert_label.setText("")
 
 class StageSelectDialog(QtWidgets.QDialog):
     def __init__(self, parent=None):
