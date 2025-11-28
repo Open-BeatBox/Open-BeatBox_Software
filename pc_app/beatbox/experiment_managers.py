@@ -539,6 +539,7 @@ class ExperimentCSVLogger:
     def __init__(self, experiment_folder, stage_number, sensor_pin_names, subject_info=None):
         self.start_time = time.time()
         self.timestamp = datetime.now().isoformat()
+        self.timestamp = self.timestamp.replace(":", "-")  # replace colons for filename compatibility
         if subject_info is not None:
             subject_id = subject_info.subject_id
             log_filename = f"FULL_{subject_id}_S{stage_number}_{self.timestamp}.csv"
@@ -574,6 +575,7 @@ class LightExperimentCSVLogger:
     def __init__(self, experiment_folder, stage_number, subject_info: SubjectInfo = None):
         self.start_time = time.time()
         self.timestamp = datetime.now().isoformat()
+        self.timestamp = self.timestamp.replace(":", "-")  # replace colons for filename compatibility
         if subject_info is not None:
             subject_id = subject_info.subject_id
             log_filename = f"{subject_id}_S{stage_number}_{self.timestamp}.csv"
