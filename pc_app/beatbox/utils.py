@@ -18,7 +18,6 @@ def crc8(data: Union[str, bytes], polynomial: int = 0x07, init: int = 0) -> int:
                 crc = (crc << 1) & 0xFF
     return crc
 
-# TODO: refactor name as it does more than just config pins
 class PinConfig:
     """
     Load pins_config.cfg and expose
@@ -31,7 +30,7 @@ class PinConfig:
     [self.pin_type] section, *not* by the numeric value written in the file.
     """
 
-    def __init__(self, cfg_path: str | Path = "pins_config.cfg", pin_type: str = 'outputs') -> None:
+    def __init__(self, cfg_path: str | Path = "pins_config.cfg", pin_type: str = 'actuators') -> None:
         """
         Load the pin configuration from the given INI file.
 
@@ -40,7 +39,7 @@ class PinConfig:
         cfg_path : str or Path
             Path to the configuration file. It will be expanded using `Path.expanduser()`.
         pin_type : str
-            Type of pin configuration to load. One of 'inputs' or 'outputs'. (default: 'outputs')
+            Type of pin configuration to load. One of 'sensors' or 'actuators'. (default: 'actuators')
         """
         self.cfg_path = Path(cfg_path).expanduser()
         if not self.cfg_path.exists():

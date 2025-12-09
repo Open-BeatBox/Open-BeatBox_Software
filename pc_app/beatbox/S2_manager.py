@@ -9,7 +9,6 @@ from qtpy import QtCore
 
 from beatbox.experiment_managers import SConfig, BaseExperimentManager, SubjectInfo
 
-
 class S2Config(SConfig):
     s_level = 'S2'
 
@@ -43,7 +42,6 @@ class BeatBoxExperimentManagerS2(BeatBoxExperimentManagerS1):
 
     performanceUpdated = QtCore.Signal(float, float)
     correctiveLoopUpdated = QtCore.Signal(int)
-    pelletDeliveryAlert = QtCore.Signal(int)  # Signal to alert GUI for blinking, emits loop count
 
 
     def __init__(self, experiment_folder, communicator,
@@ -138,7 +136,7 @@ class BeatBoxExperimentManagerS2(BeatBoxExperimentManagerS1):
             ),
             Phase.DONE: PhaseSpec(
                 on_enter=self._phase_done,
-                routes=None,  # TODO: add routing to next experiment
+                routes=None,
                 decide=lambda instance: False,
                 relevant_pins=None
             )

@@ -31,7 +31,7 @@ from beatbox.qt_utils import LEDIndicator
 from beatbox.serial_com import get_platform_serial_ports, BeatBoxCommunicator, BeatBoxMessage, HandshakeWorker
 
 
-SERIAL_TIMEOUT = 60 #2  # FIXME: change back to 2
+SERIAL_TIMEOUT = 2
 
 BAUD_RATE = 115200
 
@@ -426,7 +426,6 @@ class ArduinoControlApp(QtWidgets.QMainWindow):
         self.experiment_state_btn.clicked.connect(self.stop_experiment)
 
     def stop_experiment(self):
-        # TODO: add end of experiment logging
         self.experiment_manager.end_experiment()
         self.experiment_state_btn.setText("Start Experiment")
         self.experiment_state_btn.clicked.disconnect(self.stop_experiment)
@@ -553,7 +552,6 @@ class ArduinoControlApp(QtWidgets.QMainWindow):
 
         if ok:            # connect btn stays disabled
             QtWidgets.QMessageBox.information(self, "BeatBox", "Connection established!")
-            # self._setup_after_connect()  # TODO: see if we need this
         else:
             error_message = (f"Could not establish communication with port {self.port_combobox.currentText()}. "
                              f"Please check the serial port and try again.")
@@ -595,7 +593,14 @@ class ArduinoControlApp(QtWidgets.QMainWindow):
         self.experiment_manager.handshake_completed()
 
     def send_set_command(self, checked_pins=None):
-        # TODO: add comments, e.g. why use a timer to send a command if it's a reward ?
+        """
+        Send a set command to the BeatBox device based on the current state of the actuator controls.
+        Parameters
+        ----------
+        checked_pins : list[bool] | None
+            Optional list of boolean values indicating which pins should be set to ON.
+            If None, the current state of the actuator controls will be used.
+        """
         if not isinstance(checked_pins, (list, tuple)):
             checked_pins = None  # A status value was passed instead. Overwrite
         logger.debug(f'Sending set command with checked pins: {checked_pins}')
@@ -608,7 +613,8 @@ class ArduinoControlApp(QtWidgets.QMainWindow):
         self.actuators_controls['reward'].setChecked(False)
 
         # self.communicator.send_set_command(checked_pins, self.get_rgb_values())
-        if checked_pins[0]:  # reward
+        if checked_pins[0]:
+            # FIXME: reward delivery should be handled by the firmware
             QtCore.QTimer.singleShot(self.experiment_manager.reward_duration, self.send_set_command)
         self.experiment_manager.request_manual_action_by_pins_and_rgb(checked_pins, self.get_rgb_values())
 
@@ -703,7 +709,8 @@ class ArduinoControlApp(QtWidgets.QMainWindow):
             self.blinking_alert_label.setText("")
 
     def _handle_pellet_delivery_alert(self, loop_count: int):
-        if loop_count > 15:
+        threshold = 15
+        if loop_count > threshold:
             self.blinking_alert_label.setText(f"⚠️ Pellet delivery loop: {loop_count}! Check hardware!")
         else:
             self.blinking_alert_label.setText("")
@@ -772,7 +779,6 @@ def main():
     parser.add_argument("--n-trials", type=int, default=20, help="Number of trials to run.")
     parser.add_argument("--inter-trial-interval", type=int, default=10000,
                         help="Interval between trials in milliseconds.")
-    # FIXME: look inside the working directory rather than user space
     parser.add_argument("--pins-config-file", dest='pins_config_file',
                         type=str, default="~/.beatbox/pins_config.cfg",
                         help="Path to the pins configuration file. You should not have to modify this.")

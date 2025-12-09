@@ -74,7 +74,7 @@ class BeatBoxExperimentManagerS1(BaseExperimentManager):
 
             Phase.DONE: PhaseSpec(
                 on_enter=self._phase_done,
-                routes=None, # TODO: add routing to next experiment
+                routes=None,
                 decide= lambda instance: False,
                 relevant_pins=None
             )
@@ -98,7 +98,7 @@ class BeatBoxExperimentManagerS1(BaseExperimentManager):
         self.pelletDeliveryAlert.emit(self.pellet_delivery_loop_count)
         self._deliver_reward() # also resets screen
 
-    # FIXME: this is ugly
+    # FIXME: see below
     def _phase_wait_pellet(self):
         if not self.sensors_pins_config._current_states["nose_poke"]: # somehow there's already a pellet
             self._force_advance_to_wait_pellet()
@@ -151,7 +151,7 @@ class BeatBoxExperimentManagerS1(BaseExperimentManager):
             return 'incomplete'
         else:
             dlg = QtWidgets.QMessageBox()
-            dlg.setText(  # FIXME: end experiment, see how we could instanciate the next stage
+            dlg.setText(  #
                 f"""All pellets have been retrieved.
                 The stage {self.config.s_level} experiment is now complete.
                 You can now move to next stage."""

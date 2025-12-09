@@ -67,12 +67,12 @@ class SConfig:
             annotations = getattr(cls, '__annotations__', {})
             all_annotations.update(annotations)
             if cls is self.__class__:
-                subclass_annotations = annotations  # the most specific subclass
+                subclass_annotations = annotations
 
         return list(subclass_annotations.keys())
 
     def load(self):
-        self._config = ConfigObj(str(self.cfg_path), encoding='utf-8',  # WARNING: defaults in spec !!
+        self._config = ConfigObj(str(self.cfg_path), encoding='utf-8',
                                  configspec=str(self._spec_path), unrepr=True)
 
         self._validate()
@@ -87,7 +87,6 @@ class SConfig:
                 setattr(self, attr, self._config[attr])
 
     def _validate(self):
-        # Validate the config
         results = self._config.validate(self.validator, preserve_errors=True, copy=True)
         errors = []
         if results is not True:
@@ -232,7 +231,7 @@ class BaseExperimentManager(QtCore.QObject, metaclass=QABCMeta):
         if actuator_pins_cfg is None:
             actuator_pins_cfg = load_pin_config('actuators')
         self.actuator_pins_cfg = actuator_pins_cfg
-        self.sensors_pins_config = load_pin_config('sensors') # TODO: argument
+        self.sensors_pins_config = load_pin_config('sensors')
 
         self._out_word = self.actuator_pins_cfg.default_word()
 
@@ -281,7 +280,6 @@ class BaseExperimentManager(QtCore.QObject, metaclass=QABCMeta):
         self.start_state_machine()
 
     def end_experiment(self):
-        # TODO: close file handler ? set new file logging, log summary experiment infos
         if self._timer.isActive():
             self._timer.stop() # No need to reset counter as timer.start(timeout_ms) will do it
         self._phase_iti() # reset to a known state
@@ -375,7 +373,9 @@ class BaseExperimentManager(QtCore.QObject, metaclass=QABCMeta):
 
         if spec.decide and not timed_out:
             key = spec.decide(self)
-            target = spec.routes.get(key, spec.next_phase_default) # FIXME: crashes if next_phase_default is None
+            # FIXME: crashes if next_phase_default is None
+            # This can happen if decide returns a key not in routes and no default is set
+            target = spec.routes.get(key, spec.next_phase_default)
         else:
             target = spec.next_phase_default
 
