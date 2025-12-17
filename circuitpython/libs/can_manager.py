@@ -13,21 +13,22 @@ from adafruit_mcp2515 import MCP2515 as CAN
 from adafruit_mcp2515.canio import Message
 
 
+
 class CanManager:
-    def __init__(self):
-        # Hardware setup
-        spi = busio.SPI(board.SCK, board.MOSI, board.MISO)
-        self.spi = spi
-        cs = digitalio.DigitalInOut(board.CAN_CS)
-        cs.direction = digitalio.Direction.OUTPUT
+    def __init__(self, tx_schedule_period=0.002, rx_schedule_period=0.005, can_id = None):
+        """
+        CAN Manager for CircuitPython using MCP2515
 
-        self.can_bus = CAN(spi, cs, baudrate=1_000_000, crystal_freq=16_000_000)
+        Parameters:
+        - tx_schedule_period: scheduling target time in seconds between TX task iterations
+        - rx_schedule_period: scheduling target time in seconds between RX task iterations
 
-        # Replace the SPI device with a faster one
-        # FIXME: this is ugly, create a wrapper or modify MCP2515 lib instead
-        self.can_bus._spi_device = SPIDevice(spi, cs, baudrate=10_000_000)
+        """
+        self.spi = None
+        self.can_bus = None
+        self.can_id = can_id
+        self.init_can_bus()
 
-        print(f"SPI Freq = {self.spi.frequency}")
         # Use simple lists instead of asyncio.Queue (not available in CircuitPython)
         self.urgent_tx_queue = []
         self.normal_tx_queue = []
@@ -35,21 +36,56 @@ class CanManager:
         # Received messages with timestamps
         self.rx_callbacks = []
 
+        # RX and TX tasks scheduling
+        # NOTE: these periods are targets, actual timing depends on asyncio scheduling
+        # The idea is to keep TX priority high enough to send messages as soon as possible
+        self.tx_task_period = tx_schedule_period
+        self.rx_task_period = rx_schedule_period
+
         # Timing monitoring
+        self.monitoring_enabled = False
         self.last_rx_check = time.monotonic()
         self.rx_stats = {'messages': 0, 'max_delay': 0}
 
+    def init_can_bus(self, spi_baudrate=10_000_000, can_baudrate=1_000_000, crystal_freq=16_000_000):
+        """
+        Initialize CAN bus and SPI device, encapsulating private attribute access.
+        """
+        spi = busio.SPI(board.SCK, board.MOSI, board.MISO)
+        cs = digitalio.DigitalInOut(board.CAN_CS)
+        cs.direction = digitalio.Direction.OUTPUT
+        can_bus = CAN(spi, cs, baudrate=can_baudrate, crystal_freq=crystal_freq)
+        # Encapsulated access to private attribute for increased SPI speed
+        can_bus._bus_device_obj = SPIDevice(spi, cs, baudrate=spi_baudrate)
+        self.spi = spi
+        self.can_bus = can_bus
+
     def register_rx_callback(self, callback):
-        """Register callback for received CAN messages"""
+        """
+        Register callback for received CAN message
+
+        Callback execution must be as fast as possible to not delay RX processing.
+        The callback function should accept a single argument: the received Message object.
+        """
         self.rx_callbacks.append(callback)
 
-    def send_urgent(self, can_id, data):
+    def send_urgent(self, data, can_id = None):
         """Send high-priority CAN message"""
+        if can_id is None:
+            if self.can_id is not None:
+                can_id = self.can_id
+            else:
+                raise ValueError("CAN ID must be specified")
         message = Message(can_id, data)
         self.urgent_tx_queue.append(message)
 
-    def send_normal(self, can_id, data):
+    def send_normal(self, data, can_id = None):
         """Send normal-priority CAN message"""
+        if can_id is None:
+            if self.can_id is not None:
+                can_id = self.can_id
+            else:
+                raise ValueError("CAN ID must be specified")
         message = Message(can_id, data)
         self.normal_tx_queue.append(message)
 
@@ -65,13 +101,6 @@ class CanManager:
                 message = self.can_bus.read_message()
 
                 if message is not None:
-                    # Process immediately
-                    msg_data = {
-                        'id': message.id,
-                        'data': list(message.data),
-                        'timestamp': start_time
-                    }
-
                     # Call all registered callbacks
                     for callback in self.rx_callbacks:
                         try:
@@ -82,7 +111,7 @@ class CanManager:
                     # Update stats
                     self.rx_stats['messages'] += 1
 
-                    # Check timing
+                    # Check timing, TODO: move away from RX task, parametrize
                     processing_time = (time.monotonic() - start_time) * 1000
                     if processing_time > self.rx_stats['max_delay']:
                         self.rx_stats['max_delay'] = processing_time
@@ -94,10 +123,13 @@ class CanManager:
                 print(f"CAN RX error: {e}")
 
             # Very short sleep to maintain priority but allow other tasks
-            await asyncio.sleep(0.005)
+            await asyncio.sleep(self.rx_task_period)
 
     async def can_tx_task(self):
-        """CAN transmit task with priority handling"""
+        """
+        CAN transmit task with priority handling
+        Transmit a message then yield
+        """
         print("CAN TX Task started")
 
         while True:
@@ -116,11 +148,8 @@ class CanManager:
                 print(f"CAN TX error: {e}")
 
             # Brief yield to RX task
-            await asyncio.sleep(0.002)
+            await asyncio.sleep(self.tx_task_period)
 
     async def _send_message(self, msg):
         """Internal method to send CAN message"""
         self.can_bus.send(msg)
-        print(f"SPI Freq = {self.spi.frequency}")
-        data = int.from_bytes(msg.data, byteorder='little')
-        print(f"CAN TX: ID=0x{msg.id:03X}, DATA={data}")

@@ -16,13 +16,9 @@ class SerialManager:
         self.command_callbacks = []
         self.last_activity = time.monotonic()
 
-        # Status LED
-        self.led = digitalio.DigitalInOut(board.D25)
-        self.led.direction = digitalio.Direction.OUTPUT
-        self.led.value = False
-
         # Buffer for incoming data
         self.rx_buffer = ""
+        self.status = "OK" # OK or ERROR
 
     def register_command_callback(self, callback):
         """Register callback for received commands"""
@@ -33,7 +29,7 @@ class SerialManager:
         self.tx_queue.append(str(message))
 
     def _write_to_data_port(self, message):
-        """Write message to usb_cdc.data port"""
+        """Write message (encoded as a string) to usb_cdc.data port"""
         try:
             if usb_cdc.data and usb_cdc.data.connected:
                 # Add newline if not present
@@ -92,21 +88,20 @@ class SerialManager:
                                 try:
                                     callback(line)  # Pass string, not bytes
                                 except Exception as e:
-                                    self.led.value = True
+                                    self.status = "ERROR"
                                     print(f"Serial command callback error: {e}")
 
                 # Check processing time
                 processing_time = (time.monotonic() - start_time) * 1000
                 if processing_time > 40:
-                    self.led.value = True
+                    self.status = "ERROR"
                     print(f"Warning: Serial processing took {processing_time:.1f}ms")
 
             except Exception as e:
-                self.led.value = True
                 print(f"Serial handler error: {e}")
 
-            # Reset LED if no recent errors
+            # Reset status if no recent errors, TODO: clear when acked and resolved instead
             if time.monotonic() - self.last_activity > 1.0:
-                self.led.value = False
+                self.status = "OK"
 
             await asyncio.sleep(0.020)  # 20ms between checks
