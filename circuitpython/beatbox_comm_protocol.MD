@@ -29,26 +29,54 @@ Message format for all modules:
 
 Payload is a string sent as bytes encoded in UTF-8.
 
+Read messages
+Write messages
+Command messages
+Acknowledgment messages
+
+
 Messages common to all modules:
 
-| Message ID / Header | Message / Data Bytes | Description                                 |
-|---------------------|----------------------|---------------------------------------------|
-| SCAN                |                      | Sent by the MAIN module to SCAN for modules |
-| ID                  | Module ID (          | Sent in response to SCAN message            |
+| Message ID / Header | Message / Data Bytes                                 | Description                                 |
+|---------------------|------------------------------------------------------|---------------------------------------------|
+| SCAN                |                                                      | Sent by the MAIN module to SCAN for modules |
+| ID                  | Module ID                                            | Sent in response to SCAN message            |
+| R_STATUS            |                                                      | Sent to a module to request STATUS info     |
+| STATUS              | Current status as defined per the ModuleStatus class | Sent in response to R_STATUS message        |
 
 ## Module specific messages
 
 ### Feeder 
 
-| Message | Message ID | Description |
-|---------|------------|-------------|
-|   |            |             |
-
-
+| Message ID / Header | Message / Data Bytes | Description             |
+|---------------------|----------------------|-------------------------|
+| REWARD              |                      | Request reward delivery |
+| 
 
 ### Nosepoke
 
+| Message ID / Header | Message / Data Bytes | Description        |
+|---------------------|----------------------|--------------------|
+| BEAM_STATUS         | BROKEN/UNBROKEN      | Notify beam status |
+
 ### Screen
+
+Screen side configuration is saved in non-volatile memory.
+At the first power on, no side is defined, and it must be set by the user.
+It is then saved in NVM (Non-Volatile Memory) and used for subsequent power-on.
+
+| Message ID / Header | Message / Data Bytes | Description                         |
+|---------------------|----------------------|-------------------------------------|
+| DISPLAY PATTERN     | PATTERN ID           | Request specific pattern to display |
+| DISPLAY SIDE        | LEFT/RIGHT           | Request screen side                 |
+| SCREEN TOUCH        | LEFT/RIGHT           | Notify touch on left or right side  |
+
 
 ### Lighting
 
+| Message         | Message ID         | Description                           |
+|-----------------|--------------------|---------------------------------------|
+| SET DUTY CYCLE  | WHITE/RED/IR RATIO | Set white, red and IR LEDs duty cycle |
+| DUTY CYCLE INFO |                    | Request current duty cycles           |
+| TURN ON         |                    | Turn on the lighting module           |
+| TURN OFF        |                    | Turn off the lighting module          |
