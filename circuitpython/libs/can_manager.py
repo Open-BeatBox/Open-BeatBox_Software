@@ -13,7 +13,6 @@ from adafruit_mcp2515 import MCP2515 as CAN
 from adafruit_mcp2515.canio import Message
 
 
-
 class CanManager:
     def __init__(self, tx_schedule_period=0.002, rx_schedule_period=0.005, can_id = None):
         """
@@ -69,24 +68,22 @@ class CanManager:
         """
         self.rx_callbacks.append(callback)
 
-    def send_urgent(self, data, can_id = None):
-        """Send high-priority CAN message"""
+    def _prepare_message(self, can_id, data):
         if can_id is None:
             if self.can_id is not None:
                 can_id = self.can_id
             else:
                 raise ValueError("CAN ID must be specified")
-        message = Message(can_id, data)
+        return Message(can_id, data)
+
+    def send_urgent(self, data, can_id = None):
+        """Send high-priority CAN message"""
+        message = self._prepare_message(can_id, data)
         self.urgent_tx_queue.append(message)
 
     def send_normal(self, data, can_id = None):
         """Send normal-priority CAN message"""
-        if can_id is None:
-            if self.can_id is not None:
-                can_id = self.can_id
-            else:
-                raise ValueError("CAN ID must be specified")
-        message = Message(can_id, data)
+        message = self._prepare_message(can_id, data)
         self.normal_tx_queue.append(message)
 
     async def can_rx_task(self):

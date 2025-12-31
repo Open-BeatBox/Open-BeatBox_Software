@@ -1,0 +1,8 @@
+name: bb_mpy
+channels:
+  - conda-forge
+dependencies:
+  - python>=3.11
+  - ipython  # just for convenience
+    #  - mpremote
+  - pytest  # for testing only

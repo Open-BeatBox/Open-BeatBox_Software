@@ -6,6 +6,25 @@ This protocol is based on the CAN bus system and uses specific message IDs and d
 ## Message Structure
 Each message consists of the following components:
 
+- **ID** (uint8): 1 byte, module ID
+- **CMD** (3 chars): 3 bytes, ASCII command
+- **DATA** (4 bytes): 4 bytes, any type (raw bytes)
+
+Total message size: 8 bytes
+
+**Encoding:**
+- ID: Unsigned integer (0-255)
+- CMD: 3 ASCII characters (e.g., 'ID ', 'STA', 'RWD')
+- DATA: 4 bytes, can be any type (integer, string, status, etc.), encoded as needed
+
+**Example:**
+
+| Byte Offset | Field | Example Value       |
+|-------------|-------|---------------------|
+| 0           | ID    | 0x01                |
+| 1-3         | CMD   | 'STA'               |
+| 4-7         | DATA  | 0x00 0x00 0x00 0x01 |
+
 ## List of the current modules in Beatbox system
 
 | Module Name     | Module ID | Description                        |
@@ -16,67 +35,75 @@ Each message consists of the following components:
 | Screen Module   | 0x04      | Displays visual stimuli            |
 | Lighting Module | 0x05      | Provides ambient lights to the box |
 
-
 ## Generic messages
 
-This protocol exists outside the CAN protocol.
+All messages follow the structure:
+- **ID (uint8) | CMD (3 chars) | DATA (4 bytes)**
 
-In case the CAN bus is used to implement this protocol, these messages 
-represents the data payload of CAN message.
+Payload is encoded as bytes. For string data, use UTF-8 encoding and pad/truncate to 4 bytes.
 
-Message format for all modules:
- - Message ID / Header | Data Bytes
+### Messages common to all modules:
 
-Payload is a string sent as bytes encoded in UTF-8.
+| CMD | DATA (4 bytes)                       | Description                                      |
+|-----|--------------------------------------|--------------------------------------------------|
+| SCN | None (pad with zeros)                | Sent by MAIN to scan for modules                 |
+| ID  | Module ID (uint8, pad with zeros)    | Sent in response to SCN                          |
+| RST | None (pad with zeros)                | Request status info                              |
+| STA | Status value (uint8, pad with zeros) | Sent in response to RST                          |
+| PIN | Pin number (uint8, pad with zeros)   | Sent with the pin number and value when relevant |
+| ERR | Error code (uint8, pad with zeros)   | Sent when an error occurs                        |
 
-Read messages
-Write messages
-Command messages
-Acknowledgment messages
-
-
-Messages common to all modules:
-
-| Message ID / Header | Message / Data Bytes                                 | Description                                 |
-|---------------------|------------------------------------------------------|---------------------------------------------|
-| SCAN                |                                                      | Sent by the MAIN module to SCAN for modules |
-| ID                  | Module ID                                            | Sent in response to SCAN message            |
-| R_STATUS            |                                                      | Sent to a module to request STATUS info     |
-| STATUS              | Current status as defined per the ModuleStatus class | Sent in response to R_STATUS message        |
 
 ## Module specific messages
 
 ### Feeder 
 
-| Message ID / Header | Message / Data Bytes | Description             |
-|---------------------|----------------------|-------------------------|
-| REWARD              |                      | Request reward delivery |
-| 
+| CMD  | DATA (4 bytes) | Description             |
+|------|----------------|-------------------------|
+| RWD  | None           | Request reward delivery |
 
 ### Nosepoke
 
-| Message ID / Header | Message / Data Bytes | Description        |
-|---------------------|----------------------|--------------------|
-| BEAM_STATUS         | BROKEN/UNBROKEN      | Notify beam status |
+| CMD | DATA (4 bytes) | Description                       |
+|-----|----------------|-----------------------------------|
+| BMS | 0x00/0x01      | Beam status: 0=UNBROKEN, 1=BROKEN |
 
 ### Screen
 
 Screen side configuration is saved in non-volatile memory.
 At the first power on, no side is defined, and it must be set by the user.
+
 It is then saved in NVM (Non-Volatile Memory) and used for subsequent power-on.
 
-| Message ID / Header | Message / Data Bytes | Description                         |
-|---------------------|----------------------|-------------------------------------|
-| DISPLAY PATTERN     | PATTERN ID           | Request specific pattern to display |
-| DISPLAY SIDE        | LEFT/RIGHT           | Request screen side                 |
-| SCREEN TOUCH        | LEFT/RIGHT           | Notify touch on left or right side  |
-
+| CMD | DATA (4 bytes) | Description                          |
+|-----|----------------|--------------------------------------|
+| DIS | Pattern ID     | Request specific pattern to display  |
+| DSD | 0x00/0x01      | Request screen side: 0=LEFT, 1=RIGHT |
+| TCH | 0x00/0x01      | Notify touch: 0=LEFT, 1=RIGHT        |
 
 ### Lighting
 
-| Message         | Message ID         | Description                           |
-|-----------------|--------------------|---------------------------------------|
-| SET DUTY CYCLE  | WHITE/RED/IR RATIO | Set white, red and IR LEDs duty cycle |
-| DUTY CYCLE INFO |                    | Request current duty cycles           |
-| TURN ON         |                    | Turn on the lighting module           |
-| TURN OFF        |                    | Turn off the lighting module          |
+| CMD  | DATA (4 bytes) | Description                           |
+|------|----------------|---------------------------------------|
+| SDC  | Duty cycles    | Set white, red, IR LEDs duty cycle    |
+| DCI  | None           | Request current duty cycles           |
+| TON  | None           | Turn on the lighting module           |
+| TOF  | None           | Turn off the lighting module          |
+
+## Notes
+- All messages are 8 bytes: 1 byte ID, 3 bytes CMD, 4 bytes DATA.
+- For commands with no data, pad DATA with zeros.
+- For status or other values, encode as uint8 or appropriate type and pad/truncate to 4 bytes.
+- For string data, use UTF-8 and pad/truncate to 4 bytes.
+
+## Example encoding/decoding
+
+To encode a message:
+- ID: 0x02 (Feeder)
+- CMD: 'RWD'
+- DATA: b'\x00\x00\x00\x00'
+
+Result: b'\x02RWD\x00\x00\x00\x00'
+
+To decode, split the bytes accordingly.
+

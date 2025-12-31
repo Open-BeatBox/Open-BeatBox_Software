@@ -1,4 +1,5 @@
 import asyncio
+# from abc import ABC, abstractmethod
 
 import board
 import countio
@@ -6,19 +7,19 @@ import digitalio
 
 from adafruit_mcp2515.canio import Message, RemoteTransmissionRequest
 from adafruit_mcp2515 import MCP2515 as CAN
+from bb_mpy_module import LED
 
 from can_manager import CanManager
 
-
 # Module registry for seamless ID, ID_NAME, CAN_ID conversion
-class ModuleRegistry:
+class ModuleMap:
     _entries = [
         ("GENERIC", 0xFF, 0xFFF),
         ("MAIN", 0x00, 0x100),
-        ("NOSEPOKE", 0x01, 0x201),
-        ("FEEDER", 0x02, 0x202),
-        ("LIGHTING", 0x03, 0x203),
-        ("SCREEN", 0x04, 0x204),
+        ("SCREEN", 0x10, 0x200),
+        ("FEEDER", 0x20, 0x202),
+        ("LIGHTING", 0x30, 0x203),
+        ("NOSEPOKE", 0x40, 0x204),
         ("IR_BARRIER", 0x05, 0x205),
     ]
     name_to_id = {name: mid for name, mid, _ in _entries}
@@ -74,6 +75,61 @@ class ModuleStatus:
     def is_valid(cls, value):
         return value in cls._ALL
 
+class InterruptSensor:
+    """ Base class for sensor based on edge interrupt."""
+    def __init__(self, interrupt_pin=None, edge=countio.Edge.FALL, on_edge=None, schedule_period_s=0.02):
+        if interrupt_pin is not None:
+            self.sensor_out = countio.Counter(interrupt_pin, edge=edge)
+        self.on_edge = on_edge  # Callback to call on poke event
+        self.schedule_period_s = schedule_period_s
+
+    async def catch_interrupt(self):
+        """Call callback/send CAN as soon as pin goes low."""
+        last_count = 0
+        if self.sensor_out is None:
+            return
+        with self.sensor_out as interrupt:
+            while True:
+                if interrupt.count != last_count:
+                    last_count = interrupt.count
+                    if self.on_edge:
+                        self.on_edge()  # Call the callback immediately
+                await asyncio.sleep(schedule_period_s)
+
+class PollingSensor:
+    def __init__(self, pin=None, edge=countio.Edge.RISE_AND_FALL, on_edge=None, schedule_period_s=0.01):
+        if pin is not None:
+            self.pin = digitalio.DigitalInOut(pin)
+            self.pin.direction = digitalio.Direction.INPUT
+        self.edge = edge
+        self.on_edge = on_edge
+        self.schedule_period_s = schedule_period_s
+
+    @property
+    def value(self):
+        if self.pin is not None:
+            return self.pin.value
+        return None
+
+    async def poll_status(self):
+        """Call callback/send CAN as soon as pin goes low."""
+        last_state = self.value
+        while True:
+
+
+            if last_state != self.value:
+                if not self.on_edge:
+                    await asyncio.sleep(self.schedule_period_s)
+                else:
+                    if self.edge == countio.Edge.RISE_AND_FALL:
+                        self.on_edge()  # Call the callback immediately
+                    elif self.edge == countio.Edge.RISE and self.value:
+                        self.on_edge()
+                    elif self.edge == countio.Edge.FALL and not self.value:
+                        self.on_edge()
+            last_state = self.value
+            await asyncio.sleep(self.schedule_period_s)
+
 """
 class StatusLEDManager:
     def __init__(self, led_pin=board.D25):
@@ -114,7 +170,7 @@ class StatusLEDManager:
 """
 
 # TODO: add log method/class, to handle debug and file logging
-class ModuleManager:
+class ModuleManager():
     """
     Base module manager for Beatbox system.
     Handles CAN communication and provides a structure for module-specific functionality.
@@ -122,14 +178,14 @@ class ModuleManager:
     and can extend functionality by overriding methods.
     """
     def __init__(self, module_name: str = "GENERIC"):
-        self.led = digitalio.DigitalInOut(board.D25)
+        self.led = digitalio.DigitalInOut(USER_LED)
         self.led.direction = digitalio.Direction.OUTPUT
         self.led.value = True
 
         # Use ModuleRegistry for all lookups
         # TODO: handle invalid module_name
-        self.id = ModuleRegistry.get_id(module_name)
-        self.can_id = ModuleRegistry.get_can_id(self.id)
+        self.id = ModuleMap.get_id(module_name)
+        self.can_id = ModuleMap.get_can_id(self.id)
         print(f"Module initialized: NAME={module_name}, ID={self.id}, CAN_ID={self.can_id}")
         self.can_manager = CanManager(can_id=self.can_id)
         self.can_manager.register_rx_callback(self.can_msg_echo_on_serial)
@@ -171,3 +227,7 @@ class ModuleManager:
         Child classes should append their tasks to self.tasks before calling super().start_managers()
         """
         await asyncio.gather(*self.tasks)
+
+    #@abstractmethod
+    #def print(self): ...
+

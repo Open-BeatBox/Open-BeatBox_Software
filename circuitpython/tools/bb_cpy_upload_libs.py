@@ -5,11 +5,16 @@ import argparse
 import shutil
 from pathlib import Path
 
+# Get the absolute path to the script directory and project root
+SCRIPT_DIR = Path(__file__).resolve().parent
+PROJECT_ROOT = SCRIPT_DIR.parent
+
 # Default list of relative file paths to upload
 DEFAULT_PATHS = [
     'libs/can_manager.py',
     'libs/beatbox_module.py',
     'libs/serial_manager.py',
+    'libs/bb_pin_map.py',
 ]
 
 """Additional module files to upload"""
@@ -36,7 +41,7 @@ def upload_files(device_path, file_paths):
     lib_dir = device_path / 'lib'
     lib_dir.mkdir(parents=True, exist_ok=True)
     for rel_path in file_paths:
-        src = Path(rel_path)
+        src = (PROJECT_ROOT / rel_path).resolve()
         if not src.exists():
             print(f'Source file {src} does not exist. Skipping.')
             continue

@@ -2,53 +2,35 @@ import asyncio
 import board
 import countio
 import digitalio
-import time
 
 from adafruit_mcp2515.canio import Message, RemoteTransmissionRequest
 from adafruit_mcp2515 import MCP2515 as CAN
 
-from beatbox_module import ModuleRegistry, ModuleStatus, ModuleManager
-
-nose_poke = time.monotonic()
-time_ref = time.monotonic_ns()
-
-# TODO: move into a common utilities module
-class PhotoInterrupter:
-    def __init__(self, in_pin, out_pin):
-        self.sensor_in = digitalio.DigitalInOut(in_pin)
-        self.sensor_in.direction = digitalio.Direction.OUTPUT
-        self.sensor_in.value = True
-        self.sensor_out = countio.Counter(out_pin, edge=countio.Edge.FALL)
-
-    async def catch_interrupt(self):
-        """Print a message when pin goes low."""
-        global nose_poke
-        last_count = 0
-        with self.sensor_out as interrupt:
-            while True:
-                if interrupt.count != last_count:
-                    last_count = interrupt.count
-                    nose_poke = time.monotonic()
-                # Let another task run.
-                await asyncio.sleep(0.02)
+from beatbox_module import ModuleManager, InterruptSensor
+from bb_pin_map import NosepokePins as Pins
 
 class NosepokeModule(ModuleManager):
     def __init__(self):
         super().__init__(module_name="NOSEPOKE")
-        self.sensor = PhotoInterrupter(in_pin=board.D10, out_pin=board.D9)
-        self.tasks.append(asyncio.create_task(self.sensor.catch_interrupt()))
-        self.tasks.append(asyncio.create_task(self.check_poke()))
+        # Pass the callback to send CAN message immediately
+        self._init_ir_beam()
+        self.nosepoke = InterruptSensor(interrupt_pin=Pins.IR_BEAM_OUT, on_edge=self._on_poke)
+        self.tasks.append(asyncio.create_task(self.nosepoke.catch_interrupt()))
+        self.tasks.append(asyncio.create_task(self.reset_led()))
 
-    async def check_poke(self):
-        global nose_poke
-        last_poke = nose_poke
+    def _init_ir_beam(self):
+        self.sensor_in = digitalio.DigitalInOut(Pins.IR_BEAM_IN)
+        self.sensor_in.direction = digitalio.Direction.OUTPUT # Sensor input as output to power the IR LED
+        self.sensor_in.value = True
+
+    def _on_poke(self):
+        self.led.value = True
+        self.can_manager.send_normal(data=b"NPK")
+
+    async def reset_led(self):
+        """Reset LED after a short delay."""
         while True:
-            if last_poke != nose_poke:
-                last_poke = nose_poke
-                self.led.value = True
-                self.can_manager.send_normal(self.can_id, data=b"NPK")
-            else:
-                self.led.value = False
+            self.led.value = False
             await asyncio.sleep(0.1)
 
 # Start tasks

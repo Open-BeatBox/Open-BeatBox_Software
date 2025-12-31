@@ -6,8 +6,6 @@ SerialManager using usb_cdc.data instead of console
 
 import asyncio
 import time
-import digitalio
-import board
 import usb_cdc
 
 class SerialManager:
