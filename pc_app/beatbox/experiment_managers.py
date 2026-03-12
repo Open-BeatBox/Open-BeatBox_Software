@@ -213,7 +213,6 @@ class BaseExperimentManager(QtCore.QObject, metaclass=QABCMeta):
     sensorsStateChanged = QtCore.Signal(list)  # low-byte, LSB-first list[bool]
     actuatorsStateChanged = QtCore.Signal(list)  # hi/lo bytes
     setPayloadReady = QtCore.Signal(list, bool)  # final 2-byte mask and flush flag
-    trialStarted = QtCore.Signal(int)  # WARNING: unbound
     nextTrialRequested = QtCore.Signal()
 
     stageEnded = QtCore.Signal(str)  # stage name

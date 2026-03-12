@@ -23,19 +23,3 @@ class BeatBoxExperimentManagerS3(BeatBoxExperimentManagerS2):
         self.config.s_level = 'S3'  # For experiment.cfg section, but config spec is still S2
         self.config.load()
         # Any S3-specific initialization can go here
-
-    def reset_state_machine(self):
-        """
-        Reset the state machine for S3. Override as needed for S3-specific logic.
-        """
-        # Example: clear trial responses, reset counters, etc.
-        self.current_trial_responses = {'correct': [], 'incorrect': []}
-        self.previous_trials_responses = {'correct': [], 'incorrect': []}
-        self.left_performance = []
-        self.right_performance = []
-        self.tunnel_entered = False
-        self._touch_result = None
-        # If parent class has a reset method, call it as well
-        if hasattr(super(), 'reset_state_machine'):
-            super().reset_state_machine()
-

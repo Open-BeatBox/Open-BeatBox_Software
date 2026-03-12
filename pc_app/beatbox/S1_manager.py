@@ -86,6 +86,11 @@ class BeatBoxExperimentManagerS1(BaseExperimentManager):
         # self.turn_off_screens()
         self.set_outputs(default=True, flush=True) # Force defaults
         self.waiting_for_pellet_retrieval = False
+        self._update_gui()
+
+    def _update_gui(self):
+        """ Stage-specific GUI updates.
+        Update the GUI with the current trial number and total trials."""
         self.trialNumbersUpdated.emit(self.trial_no, self.trial_no)
 
     def _phase_deliver_pellet(self):
@@ -120,7 +125,6 @@ class BeatBoxExperimentManagerS1(BaseExperimentManager):
         self.pelletDeliveryAlert.emit(self.pellet_delivery_loop_count)
         payload = self.actuator_pins_cfg.mask()  # screens off
         self.emit_payload_ready(payload)
-        self.trialStarted.emit(self.trial_no)
 
         self.log(logging.DEBUG, f'Starting trial {self.n_pellets_retrieved + 1} of {self.config.n_trials}')
 

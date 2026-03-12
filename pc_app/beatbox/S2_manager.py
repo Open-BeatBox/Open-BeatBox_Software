@@ -48,12 +48,12 @@ class BeatBoxExperimentManagerS2(BeatBoxExperimentManagerS1):
                  main_window=None, actuator_pins_cfg: PinConfig=None,
                  subject_info: SubjectInfo = None):
         super().__init__(experiment_folder, communicator, main_window, actuator_pins_cfg, subject_info)
-        # NOTE: Trials are categorized as left or right based on the correct side for that trial
-        self.current_trial_responses = {'correct': [], 'incorrect': []}  # Each entry: (response_type, trial_type, side, pin_name)
-        self.previous_trials_responses = {'correct': [], 'incorrect': []}  # Accumulated responses
+        self.responses = { 'l': {'correct': 0, 'incorrect': 0},
+                           'r': {'correct': 0, 'incorrect': 0} }
+        self.corrective_loop_count = 0
         self.left_performance = []
         self.right_performance = []
-        self.response_side = None # 'l' or 'r' based on last response, stored for convenience
+        self.response_side = None
         self.tunnel_entered = False
         self._touch_result = None
         self.config = S2Config(Path(__file__).parent)
@@ -185,6 +185,10 @@ class BeatBoxExperimentManagerS2(BeatBoxExperimentManagerS1):
         self.check_performance()
         self.log_experiment_data()
 
+    def _update_gui(self):
+        """ Override parent method to update the GUI """
+        self.trialNumbersUpdated.emit(self.get_trial_count(), self.get_total_trial_count())
+
     def _phase_wait_tunnel(self):
         self.tunnel_entered = False
 
@@ -212,64 +216,57 @@ class BeatBoxExperimentManagerS2(BeatBoxExperimentManagerS1):
     def _stop_flash(self):
         self.set_outputs(off=['left_White_pattern','right_White_pattern'],
                          flatten=False, flush=False)
+        self.corrective_loop_count += 1
+        self.correctiveLoopUpdated.emit(self.corrective_loop_count)
         self.actuatorsStateChanged.emit(self._mask())  # tell GUI to show  # TODO: check
+
+    def _phase_wait_pellet_retrieval(self):
+        super()._phase_wait_pellet_retrieval()
+        self.corrective_loop_count = 0 # reset for next trial
+        self.correctiveLoopUpdated.emit(self.corrective_loop_count)
 
     # Handle screen touch, register response, compute performance and log it
     def _handle_screen_touch(self):
         response_type, pin_name = self._touch_result
         self._touch_result = None
+        trial_side = self.get_screen_side()
         response_side = 'l' if pin_name.startswith('left_') else 'r'
         if response_type == 'correct':
-            side = response_side
-        else: # incorrect response, the "trial side" is the opposite of the response side
-            side = 'l' if response_side == 'r' else 'r'
-        # Register response given the correct side for this trial
-        trial_type = 'trial' if not self.current_trial_responses['correct'] and not self.current_trial_responses['incorrect'] else 'corrective_loop'
-        self.current_trial_responses[response_type].append((response_type, trial_type, side, pin_name))
+            self.responses[trial_side]['correct'] += 1
+            # trial_no increased in parent class when transitioning to WAIT_PELLET_RETRIEVAL
+        else:
+            self.responses[trial_side]['incorrect'] += 1
+
         log_levels = {'correct': logging.INFO, 'incorrect': logging.INFO}
         self.log(log_levels[response_type], f"{response_type.title()} response on {pin_name}.")
+        # Update performance and GUI
+        self.compute_performance()
+        self.performanceUpdated.emit(self.get_left_performance(), self.get_right_performance())
 
     def _handle_correct_response(self):
         """Turn screens off, drop pellet, wait ITI, start next trial."""
         self._handle_screen_touch()
         self.turn_off_screens()
-        # Merge current_trial_responses into previous_trials_responses
-        for key in ['correct', 'incorrect']:
-            self.previous_trials_responses[key].extend(self.current_trial_responses[key])
-        # reset current trial responses
-        self.current_trial_responses = {'correct': [], 'incorrect': []}
-        self.compute_performance() # compute performance after adding current trial responses
-        self.correctiveLoopUpdated.emit(0)
         # Emit trial numbers
-        current_trial_number = self.count_responses(response_type='trial', previous=True)
-        corrective_loops = self.count_responses(result='incorrect', previous=False)
-        total_trials = self.count_responses(previous=True) + corrective_loops # all responses
+        total_trials = self.get_total_trial_count()
+        current_trial_number = self.get_trial_count()
         self.trialNumbersUpdated.emit(current_trial_number, total_trials)
 
     def _handle_incorrect_response(self):
         """Flash white, then wait the **same** ITI before retrying."""
         self._handle_screen_touch()
         self._flash_error()
-        self.compute_performance()  # compute performance after adding current trial responses
-        # Update corrective loop count for GUI (count corrective_loop responses in current trial)
-        corrective_loops = self.count_responses(result='incorrect', previous=False)
-        total_trials = self.count_responses(previous=True) + corrective_loops  # all responses
-        self.correctiveLoopUpdated.emit(corrective_loops)  # +1 for the current one
-        self.trialNumbersUpdated.emit(self.count_responses(response_type='trial', previous=True), total_trials)
-
-    def handle_tunnel_crossing_in(self): # NOTE: not used
-        """
-        First IR-beam break inside the tunnel.
-        """
-        pass
-        # TODO: update the GUI buttons
+        # Emit trial numbers
+        total_trials = self.get_total_trial_count()
+        current_trial_number = self.get_trial_count()
+        self.trialNumbersUpdated.emit(current_trial_number, total_trials)
 
     def handle_tunnel_crossing_out(self):
         """Nothing changes visually; simply keep the same buttons lit."""
         self.tunnel_entered = True
         # TODO: update the GUI buttons
 
-    def handle_screen_touch(self, pin_name):
+    def check_response(self, pin_name):
         if pin_name.startswith('left_'):
             is_correct = self.config.correct_pattern == self._get_pattern_from_side('l')
         elif pin_name.startswith('right_'):
@@ -277,6 +274,31 @@ class BeatBoxExperimentManagerS2(BeatBoxExperimentManagerS1):
         else:
             raise ValueError('Screen touch triggered from incorrect pin state change')
         self._touch_result = ('correct' if is_correct else 'incorrect', pin_name)
+
+    def compute_performance(self):
+        for side in ['l', 'r']:
+            correct = self.responses[side]['correct']
+            total = correct + self.responses[side]['incorrect']
+            perf = correct / total if total > 0 else 0
+            if side == 'l':
+                self.left_performance.append(perf)
+            else:
+                self.right_performance.append(perf)
+        self.light_log()
+
+    def get_left_performance(self):
+        return self.left_performance[-1] if self.left_performance else 0
+
+    def get_right_performance(self):
+        return self.right_performance[-1] if self.right_performance else 0
+
+    def get_trial_count(self):
+        return self.trial_no + 1  # trial_no is 0-indexed, we want to report 1-indexed
+
+    def get_total_trial_count(self) -> int:
+        total_trials = self.responses['l']['correct'] + self.responses['l']['incorrect'] + \
+                       self.responses['r']['correct'] + self.responses['r']['incorrect']
+        return total_trials
 
     def _dispatch_changed_pin(self, pin_name: str, edge: Edge = Edge.BOTH):
         """
@@ -308,7 +330,7 @@ class BeatBoxExperimentManagerS2(BeatBoxExperimentManagerS1):
                 self.handle_tunnel_crossing_out()
             case 'left_response' | 'right_response':
                 self.response_side = 'l' if pin_name.startswith('left_') else 'r'
-                self.handle_screen_touch(pin_name)
+                self.check_response(pin_name)
 
     def get_screen_side(self):
         if not self.config.advanced:
@@ -328,70 +350,12 @@ class BeatBoxExperimentManagerS2(BeatBoxExperimentManagerS1):
                 self.log(logging.ERROR, 'In advanced mode, left and right screen sequences must be complementary.')
         return correct_side
 
-    def compute_performance(self):
-        self._compute_left_performance()
-        self._compute_right_performance()
-        self.light_log()
-
-    def count_responses(self, result: str = None, response_type: str = None, side: str = None, previous: bool = True):
-        """
-        Count responses matching the given criteria.
-        - result: 'correct' or 'incorrect' (or None for both)
-        - response_type: 'trial' or 'corrective_loop' (or None for both)
-        - side: 'l' or 'r' (or None for both)
-        - previous: search in previous_trials_responses if True, else current_trial_responses
-        """
-        responses = self.previous_trials_responses if previous else self.current_trial_responses
-        keys = ['correct', 'incorrect'] if result is None else [result]
-        count = 0
-        for key in keys:
-            for r in responses[key]:
-                if ((response_type is None or r[1] == response_type) and
-                    (side is None or r[2] == side)):
-                    count += 1
-        return count
-
-    def _compute_left_performance(self):
-        left_correct = self.count_responses('correct', 'trial', 'l', previous=True) + \
-                       self.count_responses('correct', 'trial', 'l', previous=False)
-        left_total = left_correct + \
-                     self.count_responses('incorrect', 'trial', 'l', previous=True) + \
-                     self.count_responses('incorrect', 'trial', 'l', previous=False)
-        if not left_total:
-            return
-        performance = left_correct / left_total
-        self.left_performance.append(performance)
-        self.performanceUpdated.emit(self.get_left_performance(), self.get_right_performance())
-
-    def _compute_right_performance(self):
-        right_correct = self.count_responses('correct', 'trial', 'r', previous=True) + \
-                        self.count_responses('correct', 'trial', 'r', previous=False)
-        right_total = right_correct + \
-                      self.count_responses('incorrect', 'trial', 'r', previous=True) + \
-                      self.count_responses('incorrect', 'trial', 'r', previous=False)
-        if not right_total:
-            return
-        performance = right_correct / right_total
-        self.right_performance.append(performance)
-        self.performanceUpdated.emit(self.get_left_performance(), self.get_right_performance())
-
     def check_performance(self):
         left_performance = self.get_left_performance()
         right_performance = self.get_right_performance()
-        if ((len(self.previous_trials_responses['correct']) >= self.config.n_trials) and
+        return (self.get_trial_count() >= self.config.n_trials and
                 left_performance >= self.config.learning_threshold and
-                right_performance >= self.config.learning_threshold):
-            return True
-        else:
-            return False
-
-    def get_right_performance(self) -> int | Any:
-        right_performance = self.right_performance[-1] if len(self.right_performance) > 0 else 0
-        return right_performance
-
-    def get_left_performance(self) -> int | Any:
-        left_performance = self.left_performance[-1] if len(self.left_performance) > 0 else 0
-        return left_performance
+                right_performance >= self.config.learning_threshold)
 
     def get_experiment_status(self):
         left_performance = self.get_left_performance()
@@ -411,15 +375,15 @@ class BeatBoxExperimentManagerS2(BeatBoxExperimentManagerS1):
         BaseExperimentManager.log(self, level, message)
         state_bits = state_bits if state_bits is not None else self._get_sensor_bits_from_state_value(self._last_state_value)
         if self.csv_logger and not summary: # full logging is already done at each pin stage change
-            total_trials = self.count_responses() + self.count_responses(previous=False)
+            total_trials = self.get_total_trial_count()
             self.csv_logger.log(
                 stage=self.stage_number,
                 log_level=logging.getLevelName(level),
                 message=message,
                 total_trials=total_trials,
-                trial_number=self.count_responses(response_type='trial') + 1,  # +1 for current trial
+                trial_number= self.get_trial_count(),  # +1 for current trial
                 correct_side=self.get_screen_side(),
-                corrective_loop=self.count_responses(result='incorrect', previous=False),
+                corrective_loop=self.corrective_loop_count,
                 left_performance=self.get_left_performance(),
                 right_performance=self.get_right_performance(),
                 state_bits=state_bits
@@ -429,11 +393,11 @@ class BeatBoxExperimentManagerS2(BeatBoxExperimentManagerS1):
     def light_log(self):
         # Summary logging at the end of each trial
         self.light_logger.log(
-            trial_number=self.count_responses(response_type='trial'),
+            trial_number=self.get_trial_count(),
             correct_side=self.get_screen_side(),
             response_side=self.response_side,
             reward= 1 if self.get_screen_side() == self.response_side else 0,
-            corrective_loop=self.count_responses(result='incorrect', previous=False),
+            corrective_loop=self.corrective_loop_count,
             left_performance=self.get_left_performance(),
             right_performance=self.get_right_performance(),
         )
@@ -441,16 +405,16 @@ class BeatBoxExperimentManagerS2(BeatBoxExperimentManagerS1):
     def log_experiment_data(self, full=False):
         left_performance = self.get_left_performance()
         right_performance = self.get_right_performance()
-        corrective_loops_count = self.count_responses(result='incorrect', previous=False)
-        trial_count = self.count_responses(response_type='trial') + 1
-        total_trials = self.count_responses()
+        corrective_loops_count = self.corrective_loop_count
+        trial_count = self.get_trial_count()
+        total_trials = self.get_total_trial_count()
         if full:
             self.log(logging.INFO,
                     f"""EXPERIMENT SETUP\nMinimum number of trials: {self.config.n_trials}\nLearning threshold: {self.config.learning_threshold}""")
         self.log(logging.INFO,
                  f"""EXPERIMENT DATA
                  Trial count (current included): {trial_count}
-                 Total trials: {total_trials}
+                 Total responses: {total_trials}
                  Corrective loops count: {corrective_loops_count}
                  Left performance: {left_performance:.2f}
                  Right performance: {right_performance:.2f}""")
