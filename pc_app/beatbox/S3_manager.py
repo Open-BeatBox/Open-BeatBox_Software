@@ -2,10 +2,12 @@ from __future__ import annotations
 
 from pathlib import Path
 from qtpy import QtCore
+import logging
 
 from beatbox.S2_manager import BeatBoxExperimentManagerS2, S2Config
-from beatbox.experiment_managers import SubjectInfo
+from beatbox.experiment_managers import SubjectInfo, BaseExperimentManager
 from beatbox.utils import PinConfig
+
 
 class BeatBoxExperimentManagerS3(BeatBoxExperimentManagerS2):
     """
@@ -23,3 +25,30 @@ class BeatBoxExperimentManagerS3(BeatBoxExperimentManagerS2):
         self.config.s_level = 'S3'  # For experiment.cfg section, but config spec is still S2
         self.config.load()
         # Any S3-specific initialization can go here
+
+    def get_experiment_status(self):
+        left_performance = self.get_left_performance()
+        right_performance = self.get_right_performance()
+
+        if self.check_performance():
+            return 'complete'
+        else:
+            # Use base logger to avoid keep CSV logging clean
+            BaseExperimentManager.log(self, logging.DEBUG, f'Left performance: {left_performance:.2f} -'
+                                                           f'Right performance: {right_performance:.2f} -'
+                                                           f'Learning threshold not reached.'
+                                                           f'Stage S{self.stage_number} is not complete.')
+            return 'incomplete'
+
+    def check_performance(self):
+        """ S3 end is triggered manually by the experimenter, so we don't check performance here. """
+        return False
+
+        """ Overrides S2 method to check both side"""
+        left_performance = self.get_left_performance()
+        right_performance = self.get_right_performance()
+
+        return (len(self.left_responses) >= self.config.n_trials and
+                len(self.right_responses) >= self.config.n_trials and
+                left_performance >= self.config.learning_threshold and
+                right_performance >= self.config.learning_threshold)
