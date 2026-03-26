@@ -602,7 +602,7 @@ class LightExperimentCSVLogger:
         self.file = open(self.file_path, "w", newline="")
         self.writer = csv.writer(self.file)
         header = [
-            "date", "inter_trial_interval_start_ts", "screen_touch_ts", "reward_collect_ts",
+            "date", "show_stim_ts", "screen_touch_ts", "reward_collect_ts",
             "total_trials", "correct_side", "response", "reward", "correct",
             "incorrect", "valid", "corrective_loop", "overall_perf", "perf_left", "perf_right"
         ]
@@ -612,7 +612,7 @@ class LightExperimentCSVLogger:
     # call this method at the end of each trial/when there is a response
     def log(self, trial_number, correct_side, response_side, reward, correct,
             incorrect, valid, corrective_loop, overall_performance, left_performance, right_performance,
-            inter_trial_interval_start_ts=None, screen_touch_ts=None, reward_collect_ts=None, date=None):
+            show_stim_ts=None, screen_touch_ts=None, reward_collect_ts=None, date=None):
         # 'date' should be the time when entering inter_trial_interval phase
         if date is None:
             date = datetime.now().isoformat()
@@ -621,7 +621,7 @@ class LightExperimentCSVLogger:
             return round((ts - self.start_time)/1000, 3) if ts is not None else "NA"
         row = [
             date,
-            rel(inter_trial_interval_start_ts),  # seconds (float)
+            rel(show_stim_ts),  # seconds (float)
             rel(screen_touch_ts),                # seconds (float)
             rel(reward_collect_ts),              # seconds (float)
             trial_number, correct_side, response_side, reward, correct,

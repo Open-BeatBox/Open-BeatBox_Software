@@ -77,7 +77,7 @@ class BeatBoxExperimentManagerS2(BeatBoxExperimentManagerS1):
         self._right_perf = 0.0
         self._overall_perf = 0.0
         # Timestamps for logging
-        self._inter_trial_interval_start_ts = None
+        self._stimulus_show_ts = None  # Timestamp when stimulus is shown
         self._screen_touch_ts = None
         self._reward_collect_ts = None
         # FIXME: should not be here, this is the adapter between pins_config and the experiment configspec
@@ -219,6 +219,8 @@ class BeatBoxExperimentManagerS2(BeatBoxExperimentManagerS1):
 
     def _phase_show_stim(self):
         self._touch_result = None
+        # Set stimulus show timestamp (in ms since experiment start)
+        self._stimulus_show_ts = int(time.time() * 1000)
         names = [self._get_current_pattern_name('l'), self._get_current_pattern_name('r')]
         self.set_outputs(on=names, flatten=True, flush=True)
 
@@ -475,12 +477,12 @@ class BeatBoxExperimentManagerS2(BeatBoxExperimentManagerS1):
             overall_performance=self.get_overall_performance(),
             left_performance=self.get_left_performance(),
             right_performance=self.get_right_performance(),
-            inter_trial_interval_start_ts=self._inter_trial_interval_start_ts,
+            show_stim_ts=self._stimulus_show_ts,
             screen_touch_ts=self._screen_touch_ts,
             reward_collect_ts=self._reward_collect_ts
         )
         # Reset timestamps for next trial
-        self._inter_trial_interval_start_ts = None
+        self._stimulus_show_ts = None
         self._screen_touch_ts = None
         self._reward_collect_ts = None
 
