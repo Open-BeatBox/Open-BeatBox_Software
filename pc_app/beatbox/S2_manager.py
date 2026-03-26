@@ -63,10 +63,9 @@ class BeatBoxExperimentManagerS2(BeatBoxExperimentManagerS1):
         self.response_side = None
         self.tunnel_entered = False
         self._touch_result = None
-        self._touch_timestamp = 0
         self._pellet_retrieval_timestamp = 0
         self._screen_side = None
-        self._last_response_side = None
+        self._last_trial_side = None
         self._last_response_type = None
         # Store only the last N responses, where N = n_trials from config
         self.config = S2Config(Path(__file__).parent)
@@ -77,6 +76,10 @@ class BeatBoxExperimentManagerS2(BeatBoxExperimentManagerS1):
         self._left_perf = 0.0
         self._right_perf = 0.0
         self._overall_perf = 0.0
+        # Timestamps for logging
+        self._inter_trial_interval_start_ts = None
+        self._screen_touch_ts = None
+        self._reward_collect_ts = None
         # FIXME: should not be here, this is the adapter between pins_config and the experiment configspec
         self.screen_pattern_suffixes = {
             'w': "_White_pattern",
@@ -201,6 +204,8 @@ class BeatBoxExperimentManagerS2(BeatBoxExperimentManagerS1):
 
     def _phase_iti(self):
         super()._phase_iti()
+        # Set ITI start timestamp (in ms since experiment start)
+        self._inter_trial_interval_start_ts = int(time.time() * 1000)
         self.update_screen_side()
         self.check_performance()
         self.log_experiment_data()
@@ -243,6 +248,8 @@ class BeatBoxExperimentManagerS2(BeatBoxExperimentManagerS1):
 
     def _phase_wait_pellet_retrieval(self):
         super()._phase_wait_pellet_retrieval()
+        # Record the timestamp of reward collection (in ms since experiment start)
+        self._reward_collect_ts = int(time.time() * 1000)
         self.corrective_loop_count = 0  # reset for next trial
         self.correctiveLoopUpdated.emit(self.corrective_loop_count)
 
@@ -251,21 +258,21 @@ class BeatBoxExperimentManagerS2(BeatBoxExperimentManagerS1):
         import time
         response_type, pin_name = self._touch_result
         self._touch_result = None
-        self._last_response_side = self.get_screen_side()
+        self._last_trial_side = self.get_screen_side()
         self._last_response_type = response_type
         self.total_trials += 1
+        # Record the timestamp of the screen touch (in ms since experiment start)
+        self._screen_touch_ts = int(time.time() * 1000)
         if response_type == 'correct':
-            # Record the timestamp of the correct response
-            self._touch_timestamp = time.time() * 1000  # ms
             # Do not append yet, wait for pellet retrieval
             pass
         else:
             # Incorrect response, append as 'incorrect'
             self.total_incorrect_trials += 1
             self.total_valid_trials += 1  # incorrect are valid trials by definition
-            if self._last_response_side == 'l':
+            if self._last_trial_side == 'l':
                 self.left_responses.append('incorrect')
-            elif self._last_response_side == 'r':
+            elif self._last_trial_side == 'r':
                 self.right_responses.append('incorrect')
             # Update performance and GUI after incorrect response
             self.compute_performance()
@@ -278,25 +285,33 @@ class BeatBoxExperimentManagerS2(BeatBoxExperimentManagerS1):
     def handle_pellet_retrieved(self):
         self._pellet_retrieval_timestamp = time.time() * 1000  # ms
         # Only update if last response was correct
-        if self._last_response_side and self._last_response_type == 'correct':
-            delay = self._pellet_retrieval_timestamp - self._touch_timestamp
+        if self._last_trial_side and self._last_response_type == 'correct':
+            delay = self._pellet_retrieval_timestamp - self._screen_touch_ts
             time_pressure = int(self.config.time_pressure_ms)
-            responses = self.left_responses if self._last_response_side == 'l' else self.right_responses
+            responses = self.left_responses if self._last_trial_side == 'l' else self.right_responses
             if delay <= time_pressure:
                 responses.append('valid')
                 self.total_valid_trials += 1
                 self.total_correct_trials += 1
             else:
                 # invalid responses are not taken into account
+                # FIXME:HACK: in S2 invalid trials are the only way to have incorrect response, this
+                # hack enables us to compute perf for S2 without redesigning S2 and S3 too much but should
+                # be changed as soon as possible
+                if self.stage_number == 2:
+                    responses.append('incorrect')
                 self.total_invalid_trials += 1
             # After updating, recompute performance
             self.compute_performance()
             ## TODO: find a more flexible to display either overall performance or side performances
             ## This is a quick hack to not update the GUI fields
-            self.performanceUpdated.emit(self.get_overall_performance(), self.get_overall_performance())
+            if self.stage_number == 2:
+                self.performanceUpdated.emit(self.get_overall_performance(), self.get_overall_performance())
+            else:
+                self.performanceUpdated.emit(self.get_left_performance(), self.get_right_performance())
             self.trialNumbersUpdated.emit(self.get_correct_count(), self.get_total_trial_count())
         # Reset last response info
-        self._last_response_side = None
+        self._last_trial_side = None
         self._last_response_type = None
         super().handle_pellet_retrieved()
 
@@ -459,8 +474,15 @@ class BeatBoxExperimentManagerS2(BeatBoxExperimentManagerS1):
             corrective_loop=self.corrective_loop_count,
             overall_performance=self.get_overall_performance(),
             left_performance=self.get_left_performance(),
-            right_performance=self.get_right_performance()
+            right_performance=self.get_right_performance(),
+            inter_trial_interval_start_ts=self._inter_trial_interval_start_ts,
+            screen_touch_ts=self._screen_touch_ts,
+            reward_collect_ts=self._reward_collect_ts
         )
+        # Reset timestamps for next trial
+        self._inter_trial_interval_start_ts = None
+        self._screen_touch_ts = None
+        self._reward_collect_ts = None
 
     def log_experiment_data(self, full=False):
         left_performance = self.get_left_performance()
