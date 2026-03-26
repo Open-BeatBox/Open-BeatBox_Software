@@ -291,7 +291,9 @@ class BeatBoxExperimentManagerS2(BeatBoxExperimentManagerS1):
                 self.total_invalid_trials += 1
             # After updating, recompute performance
             self.compute_performance()
-            self.performanceUpdated.emit(self.get_left_performance(), self.get_right_performance())
+            ## TODO: find a more flexible to display either overall performance or side performances
+            ## This is a quick hack to not update the GUI fields
+            self.performanceUpdated.emit(self.get_overall_performance(), self.get_overall_performance())
             self.trialNumbersUpdated.emit(self.get_correct_count(), self.get_total_trial_count())
         # Reset last response info
         self._last_response_side = None
@@ -326,7 +328,7 @@ class BeatBoxExperimentManagerS2(BeatBoxExperimentManagerS1):
         # Only 'valid' counts as correct, 'invalid' and 'incorrect' as incorrect
         def perf(responses):
             valid = sum(1 for r in responses if r == 'valid')
-            total = sum(1 for r in responses if r in ('valid', 'invalid', 'incorrect'))
+            total = sum(1 for r in responses if r in ('valid', 'incorrect'))
             return valid / total if total > 0 else 0.0
 
         all_responses = list(self.left_responses) + list(self.right_responses)
