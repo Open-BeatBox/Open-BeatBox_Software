@@ -38,10 +38,12 @@ from beatbox.validators import list_w_choice
 
 ANY_PIN: Final = object()
 
+
 class SubjectInfo:
     """
     Class to hold subject information.
     """
+
     def __init__(self, subject_id: str = '', weight: int = 0,
                  box: str = '', sex: str = '', light_cycle: str = ''):
         self.subject_id = subject_id
@@ -49,6 +51,7 @@ class SubjectInfo:
         self.box = box
         self.sex = sex
         self.light_cycle = light_cycle
+
 
 class SConfig:
     s_level: str = 'S0'
@@ -116,15 +119,15 @@ class SConfig:
 
 
 class Edge(Enum):
-    RISING  = 'rising'
+    RISING = 'rising'
     FALLING = 'falling'
-    BOTH    = 'both'
+    BOTH = 'both'
 
 
 RelevantPins = Union[
     ANY_PIN,
-    None,                   # ignore all pins
-    Mapping[str, Edge],     # pin -> required edge
+    None,  # ignore all pins
+    Mapping[str, Edge],  # pin -> required edge
 ]
 
 
@@ -134,20 +137,20 @@ class Phase(Enum):
     Each phase corresponds to a specific state in the experiment flow.
     Add new phases here as needed for the experiment.
     """
-    ITI         = auto()
+    ITI = auto()
     WAIT_TUNNEL = auto()
     DELIVER_PELLET = auto()
     WAIT_PELLET = auto()
     WAIT_PELLET_RETRIEVAL = auto()
-    SHOW_STIM   = auto()
-    WAIT_TOUCH  = auto()
+    SHOW_STIM = auto()
+    WAIT_TOUCH = auto()
     CORRECT_RESPONSE = auto()
     INCORRECT_RESPONSE = auto()
     STOP_FLASH = auto()  # used to stop flashing the error light
     DONE = auto()
 
 
-DecisionFn = Callable[['BaseExperimentManager'], Any]   # returns a key for the dict
+DecisionFn = Callable[['BaseExperimentManager'], Any]  # returns a key for the dict
 # DecisionFn2 = Callable[[], Any]   # returns a key for the dict
 OnEnterFn = Callable[[], None]  # No return as there is "nobody" to return to in the state machine
 
@@ -176,25 +179,29 @@ class PhaseSpec:
         A list of pin names that are relevant for this phase. If ANY_PIN, any pin is relevant.
         If None, no pins are considered relevant. Irrelevant pins are ignored.
     """
-    on_enter:   OnEnterFn | None           = None           # method name
-    next_phase_default: Phase | None       = None          # fallback next phase if timer hit or no decide
-    routes:     Mapping[Any, Phase] | None = field(default_factory=dict)   # Map from e.g. bool or str to Phase spec
-    timeout_ms: int | None                 = None          # default, None → no timer
-    decide: DecisionFn | None          = None
-    relevant_pins: RelevantPins   = ANY_PIN # by default, ANY_PIN means any pin is relevant,
-                                                             # None means ignore all pins
+    on_enter: OnEnterFn | None = None  # method name
+    next_phase_default: Phase | None = None  # fallback next phase if timer hit or no decide
+    routes: Mapping[Any, Phase] | None = field(default_factory=dict)  # Map from e.g. bool or str to Phase spec
+    timeout_ms: int | None = None  # default, None → no timer
+    decide: DecisionFn | None = None
+    relevant_pins: RelevantPins = ANY_PIN  # by default, ANY_PIN means any pin is relevant,
+
+    # None means ignore all pins
     # FIXME: prefer properties instead maybe ?
     def set_timeout(self, value):
-        if value is None or value < 0 :
+        if value is None or value < 0:
             return
         self.timeout_ms = value
+
 
 # Grab the actual Qt metaclass that PyQt uses
 QtMeta = type(QtCore.QObject)
 
+
 class QABCMeta(QtMeta, ABCMeta):
     """Metaclass that satisfies both Qt (QObject) and ABC requirements."""
     pass
+
 
 class BaseExperimentManager(QtCore.QObject, metaclass=QABCMeta):
     """
@@ -209,7 +216,7 @@ class BaseExperimentManager(QtCore.QObject, metaclass=QABCMeta):
     stage_number = None  # to be set in subclasses
 
     # shared signals
-    pelletRetrieved = QtCore.Signal()          # GUI may connect
+    pelletRetrieved = QtCore.Signal()  # GUI may connect
     sensorsStateChanged = QtCore.Signal(list)  # low-byte, LSB-first list[bool]
     actuatorsStateChanged = QtCore.Signal(list)  # hi/lo bytes
     setPayloadReady = QtCore.Signal(list, bool)  # final 2-byte mask and flush flag
@@ -218,7 +225,7 @@ class BaseExperimentManager(QtCore.QObject, metaclass=QABCMeta):
     stageEnded = QtCore.Signal(str)  # stage name
     phaseChanged = QtCore.Signal(str)  # Emitted with the new phase name
     stageChanged = QtCore.Signal(str)  # Emitted with the new stage name
-    pelletDeliveryAlert = QtCore.Signal(int) # Emitted with the number of tries for pellet delivery
+    pelletDeliveryAlert = QtCore.Signal(int)  # Emitted with the number of tries for pellet delivery
 
     def __init__(self, experiment_folder: str | Path, communicator: BeatBoxCommunicator,
                  main_window: QtWidgets.QMainWindow = None,
@@ -242,7 +249,7 @@ class BaseExperimentManager(QtCore.QObject, metaclass=QABCMeta):
         self.trial_no = 0
         self.waiting_for_pellet_delivery = False
         self.pellet_delivered = False
-        self.n_pellets_retrieved = 0 # also the current trial number
+        self.n_pellets_retrieved = 0  # also the current trial number
         self.waiting_for_pellet_retrieval = False  # whether the manager is waiting for a pellet to be retrieved
         self.pellet_delivery_loop_count = 0
 
@@ -280,8 +287,8 @@ class BaseExperimentManager(QtCore.QObject, metaclass=QABCMeta):
 
     def end_experiment(self):
         if self._timer.isActive():
-            self._timer.stop() # No need to reset counter as timer.start(timeout_ms) will do it
-        self._phase_iti() # reset to a known state
+            self._timer.stop()  # No need to reset counter as timer.start(timeout_ms) will do it
+        self._phase_iti()  # reset to a known state
         self.log(logging.INFO, 'Experiment ended.')
         if hasattr(self, 'logger') and isinstance(self.logger, ExperimentCSVLogger):
             self.logger.close()
@@ -289,7 +296,7 @@ class BaseExperimentManager(QtCore.QObject, metaclass=QABCMeta):
     def _setup_logging(self):
         self.logger = logging.getLogger(f'ExperimentManagerS{self.stage_number}')
         self.logger.setLevel(logging.INFO)
-        self.propagate=True
+        self.propagate = True
 
     def _setup_file_logging(self, with_light_logger: bool = True):
         self.csv_logger = ExperimentCSVLogger(
@@ -357,7 +364,7 @@ class BaseExperimentManager(QtCore.QObject, metaclass=QABCMeta):
 
         # NOTE: this needs to come after timer start to be able to cancel it in the entry action if needed
         if spec.on_enter is not None:  # Entry action
-            #spec.on_enter(self)
+            # spec.on_enter(self)
             spec.on_enter()
 
         self.phaseChanged.emit(str(phase))  # Emit the phase change signal
@@ -403,7 +410,7 @@ class BaseExperimentManager(QtCore.QObject, metaclass=QABCMeta):
         GUI asks to toggle multiple outputs with RGB colors.
         The manager builds the mask and emits it.
         """
-        bitmask = sum(2**i for i, checked in enumerate(checked_pins) if checked)
+        bitmask = sum(2 ** i for i, checked in enumerate(checked_pins) if checked)
 
         payload = [bitmask >> 8, bitmask & 0xff]
 
@@ -411,7 +418,8 @@ class BaseExperimentManager(QtCore.QObject, metaclass=QABCMeta):
             payload.extend(rgb_values)
         self.emit_payload_ready(payload)
 
-    def set_outputs(self, on: List[str] = (), off: List[str] = (), flatten: bool = False, flush: bool = False, default: bool = False) -> None:
+    def set_outputs(self, on: List[str] = (), off: List[str] = (), flatten: bool = False, flush: bool = False,
+                    default: bool = False) -> None:
         """
         Set the outputs specified in `on` to high and those in `off` to low.
         If `flatten` is True, all other outputs are set to low.
@@ -450,6 +458,7 @@ class BaseExperimentManager(QtCore.QObject, metaclass=QABCMeta):
 
     def turn_off_screens(self):
         self.set_outputs(on=['left_Black_pattern', 'right_Black_pattern'], flatten=True, flush=False)
+
     # ##################################  INPUT HANDLERS  ##################################
 
     @QtCore.Slot(int)
@@ -459,7 +468,8 @@ class BaseExperimentManager(QtCore.QObject, metaclass=QABCMeta):
         sensor_bits = self._get_sensor_bits_from_state_value(state_value)
         self.sensorsStateChanged.emit(sensor_bits)
         # self.log(logging.INFO, f'State value: {state_value:#04x} ({state_value:03d}); state bits, {", ".join(str(bit) for bit in sensor_bits)}', state_bits=sensor_bits)
-        changed_pins = {pin_name: bool(pin_on) for pin_name, pin_on in zip(self.sensors_pins_config.pin_names, sensor_bits)
+        changed_pins = {pin_name: bool(pin_on) for pin_name, pin_on in
+                        zip(self.sensors_pins_config.pin_names, sensor_bits)
                         if bool(pin_on) != self.sensors_pins_config._current_states[pin_name]}
         self.log(logging.DEBUG, f'Changed pins: {changed_pins}', state_bits=sensor_bits)
         for pin_name, bit_state in changed_pins.items():
@@ -529,11 +539,15 @@ class BaseExperimentManager(QtCore.QObject, metaclass=QABCMeta):
         """
         raise NotImplementedError("Subclasses must implement this method.")
 
-    def handle_n_trials_changed(self, value):...
-    def handle_inter_trial_interval_changed(self, value): ...
+    def handle_n_trials_changed(self, value):
+        ...
 
+    def handle_inter_trial_interval_changed(self, value):
+        ...
 
     ############################# CSV loggers #############################
+
+
 class ExperimentCSVLogger:
     def __init__(self, experiment_folder, stage_number, sensor_pin_names, subject_info=None):
         self.start_time = time.time()
@@ -549,10 +563,10 @@ class ExperimentCSVLogger:
         self.file = open(self.file_path, "w", newline="")
         self.writer = csv.writer(self.file)
         header = [
-            "date", "timestamp_s", "stage", "log_level", "message",
-            "correct_side", "total_trials", "trial_number", "corrective_loop",
-            "left_performance", "right_performance"
-        ] + [f"state_{name}" for name in sensor_pin_names]
+                     "date", "timestamp_s", "stage", "log_level", "message",
+                     "correct_side", "total_trials", "trial_number", "corrective_loop",
+                     "left_performance", "right_performance"
+                 ] + [f"state_{name}" for name in sensor_pin_names]
         self.writer.writerow(header)
 
     def log(self, stage, log_level, message, total_trials, trial_number, correct_side,
@@ -560,16 +574,20 @@ class ExperimentCSVLogger:
         timestamp_s = f"{(time.time() - self.start_time):.3f}"
         date = datetime.now().isoformat()
         row = [
-            date, timestamp_s, stage, log_level, message,
-            correct_side, total_trials, trial_number, corrective_loop,
-            left_performance, right_performance
-        ] + list(state_bits)
+                  date, timestamp_s, stage, log_level, message,
+                  correct_side, total_trials, trial_number, corrective_loop,
+                  left_performance, right_performance
+              ] + list(state_bits)
         self.writer.writerow(row)
         self.file.flush()
 
     def close(self):
         self.file.close()
 
+
+# FIXME: this is a bit redundant with ExperimentCSVLogger, we could merge them and have a single logger with more flexible logging method
+# FIXME: this mainly used by S2 and S3 so it should be defined there
+# Maybe make an abstract CSV logger class that should be implemented in S managers?
 class LightExperimentCSVLogger:
     def __init__(self, experiment_folder, stage_number, subject_info: SubjectInfo = None):
         self.start_time = time.time()
@@ -583,22 +601,20 @@ class LightExperimentCSVLogger:
         self.file_path = Path(experiment_folder) / log_filename
         self.file = open(self.file_path, "w", newline="")
         self.writer = csv.writer(self.file)
-        header = [
-            "date", "timestamp_s", "current_trial", "correct_side", "response_side",
-            "reward", "valid", "corrective_loop", "perf_left", "perf_right"
-        ]
+        header = ["date", "timestamp", "total_trials", "correct_side", "response", "reward", "correct",
+                  "incorrect", "valid", "corrective_loop", "overall_perf", "perf_left", "perf_right"
+                  ]
         self.writer.writerow(header)
 
     # Reward is just a bool and should be true when we transition to another trial
     # call this method at the end of each trial/when there is a response
-    def log(self, trial_number, reward, valid, correct_side, response_side,
-            corrective_loop, left_performance, right_performance):
+    def log(self, trial_number, correct_side, response_side, reward, correct,
+            incorrect, valid, corrective_loop, overall_performance, left_performance, right_performance):
         date = datetime.now().isoformat()
         timestamp_s = f"{(time.time() - self.start_time):.3f}"
         row = [
-            date, timestamp_s, f"n={trial_number}", correct_side, response_side,
-            reward, corrective_loop,
-            left_performance, right_performance
+            date, timestamp_s, trial_number, correct_side, response_side, reward, correct,
+            incorrect, valid, corrective_loop, overall_performance, left_performance, right_performance
         ]
         self.writer.writerow(row)
         self.file.flush()

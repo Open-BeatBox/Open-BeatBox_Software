@@ -280,11 +280,11 @@ class ArduinoControlApp(QtWidgets.QMainWindow):
         self.total_trials_value_label.setTextInteractionFlags(QtCore.Qt.TextSelectableByMouse)
         trial_info_layout.addWidget(total_trials_label)
         trial_info_layout.addWidget(self.total_trials_value_label)
-        current_trial_label = QtWidgets.QLabel("Current trial number:")
-        self.current_trial_value_label = QtWidgets.QLabel("0")
-        self.current_trial_value_label.setTextInteractionFlags(QtCore.Qt.TextSelectableByMouse)
-        trial_info_layout.addWidget(current_trial_label)
-        trial_info_layout.addWidget(self.current_trial_value_label)
+        correct_count_label = QtWidgets.QLabel("Correct responses count:")
+        self.correct_count_value_label = QtWidgets.QLabel("0")
+        self.correct_count_value_label.setTextInteractionFlags(QtCore.Qt.TextSelectableByMouse)
+        trial_info_layout.addWidget(correct_count_label)
+        trial_info_layout.addWidget(self.correct_count_value_label)
         corrective_loop_label = QtWidgets.QLabel("Corrective loop count:")
         self.corrective_loop_value_label = QtWidgets.QLabel("0")
         self.corrective_loop_value_label.setTextInteractionFlags(QtCore.Qt.TextSelectableByMouse)
@@ -656,8 +656,8 @@ class ArduinoControlApp(QtWidgets.QMainWindow):
     def _update_corrective_loop(self, corrective_count: int):
         self.corrective_loop_value_label.setText(str(corrective_count))
 
-    def _update_trial_numbers(self, current_trial_number: int, total_trials: int):
-        self.current_trial_value_label.setText(str(current_trial_number))
+    def _update_trial_numbers(self, correct_count: int, total_trials: int):
+        self.correct_count_value_label.setText(str(correct_count))
         self.total_trials_value_label.setText(str(total_trials))
 
     def _update_experiment_state_btn(self):
