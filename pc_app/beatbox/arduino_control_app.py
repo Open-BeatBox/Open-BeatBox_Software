@@ -476,6 +476,7 @@ class ArduinoControlApp(QtWidgets.QMainWindow):
                 self.connect_signal_from_experiment_manager()
                 self.experiment_manager.link_widgets()
                 self.experiment_manager.start_experiment()
+                self._reset_performance_gui()
             case _:
                 QtWidgets.QMessageBox.information(
                     self, f"Stage {self.experiment_manager.config.s_level} Complete",
@@ -659,6 +660,15 @@ class ArduinoControlApp(QtWidgets.QMainWindow):
     def _update_trial_numbers(self, correct_count: int, total_trials: int):
         self.correct_count_value_label.setText(str(correct_count))
         self.total_trials_value_label.setText(str(total_trials))
+
+    def _reset_performance_gui(self):
+        """Reset performance and trial GUI fields to initial state when transitioning stages."""
+        self.left_value_label.setText(f"{0:.2f}")
+        self.right_value_label.setText(f"{0:.2f}")
+        self.total_trials_value_label.setText("0")
+        self.correct_count_value_label.setText("0")
+        self.corrective_loop_value_label.setText("0")
+        # If there are other fields to reset, add them here
 
     def _update_experiment_state_btn(self):
         self.experiment_state_btn.setEnabled(self._serial_connected and self._folder_selected)
