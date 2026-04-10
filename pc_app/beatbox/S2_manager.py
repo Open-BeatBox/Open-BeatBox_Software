@@ -31,7 +31,7 @@ class S2Config(SConfig):
 
 from beatbox.S1_manager import BeatBoxExperimentManagerS1
 from beatbox.experiment_managers import Phase, PhaseSpec, Edge
-from beatbox.utils import PinConfig
+from beatbox.utils import PinConfig, PATTERN_LUT, bitmask_from_pattern, get_pin_names_from_pattern, PATTERN_ID
 
 
 class BeatBoxExperimentManagerS2(BeatBoxExperimentManagerS1):
@@ -219,9 +219,25 @@ class BeatBoxExperimentManagerS2(BeatBoxExperimentManagerS1):
 
     def _phase_show_stim(self):
         self._touch_result = None
-        # Set stimulus show timestamp (in ms since experiment start)
+        self._set_stimulus_show_timestamp()
+        left_pattern = self._get_side_pattern('l')
+        right_pattern = self._get_side_pattern('r')
+        left_names = get_pin_names_from_pattern(left_pattern, 'left')
+        right_names = get_pin_names_from_pattern(right_pattern, 'right')
+        names = [*left_names, *right_names]
+        self._activate_stimulus_outputs(names)
+
+    def _set_stimulus_show_timestamp(self):
+        """Set the timestamp for when the stimulus is shown."""
         self._stimulus_show_ts = int(time.time() * 1000)
-        names = [self._get_current_pattern_name('l'), self._get_current_pattern_name('r')]
+
+    def _get_side_pattern(self, side: str):
+        """Get the pattern for a given side ('l' or 'r')."""
+        pattern_key = self._get_pattern_from_side(side)
+        return PATTERN_LUT[pattern_key]
+
+    def _activate_stimulus_outputs(self, names):
+        """Set the outputs for the given pin names."""
         self.set_outputs(on=names, flatten=True, flush=True)
 
     def _phase_done(self):
@@ -230,18 +246,13 @@ class BeatBoxExperimentManagerS2(BeatBoxExperimentManagerS1):
         self.stageEnded.emit(self.config.s_level)
 
     def _flash_error(self):
+        names = get_pin_names_from_pattern(PATTERN_ID.BLINK, 'both')
         # Setting both White and Black patterns makes the screen blink
-        self.set_outputs(on=['left_White_pattern',
-                             'left_Black_pattern',
-                             'right_White_pattern',
-                             'right_Black_pattern'], flatten=True, flush=True)
-        self.actuatorsStateChanged.emit(self._mask('left_White_pattern',
-                                                   'left_Black_pattern',
-                                                   'right_White_pattern',
-                                                   'right_Black_pattern'))  # tell GUI to show
+        self.set_outputs(on=names, flatten=True, flush=True)
+        self.actuatorsStateChanged.emit(self._mask(*names))  # tell GUI to show
 
     def _stop_flash(self):
-        self.set_outputs(off=['left_White_pattern', 'right_White_pattern'],
+        self.set_outputs(off=get_pin_names_from_pattern(PATTERN_ID.FULL_WHITE, 'both'),
                          flatten=False, flush=False)
         self.corrective_loop_count += 1
         self.total_corrective_loop_trials += 1
@@ -301,7 +312,7 @@ class BeatBoxExperimentManagerS2(BeatBoxExperimentManagerS1):
                 # hack enables us to compute perf for S2 without redesigning S2 and S3 too much but should
                 # be changed as soon as possible
                 if self.stage_number == 2:
-                    responses.append('incorrect')
+                    responses.append('incorrect') # HACK
                 self.total_invalid_trials += 1
             # After updating, recompute performance
             self.compute_performance()

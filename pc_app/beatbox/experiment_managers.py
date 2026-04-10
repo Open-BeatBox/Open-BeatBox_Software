@@ -33,7 +33,7 @@ from configobj.validate import Validator
 from qtpy import QtCore, QtWidgets
 
 from beatbox.serial_com import BeatBoxCommunicator, SetPayloadOutputBus
-from beatbox.utils import PinConfig, load_pin_config
+from beatbox.utils import PinConfig, load_pin_config, get_pin_names_from_pattern
 from beatbox.validators import list_w_choice
 
 ANY_PIN: Final = object()
@@ -457,7 +457,7 @@ class BaseExperimentManager(QtCore.QObject, metaclass=QABCMeta):
         self.set_outputs(flatten=True, flush=True)
 
     def turn_off_screens(self):
-        self.set_outputs(on=['left_Black_pattern', 'right_Black_pattern'], flatten=True, flush=False)
+        self.set_outputs(flatten=True, flush=False)
 
     # ##################################  INPUT HANDLERS  ##################################
 
