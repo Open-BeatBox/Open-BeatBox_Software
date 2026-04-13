@@ -35,6 +35,7 @@ SERIAL_TIMEOUT = 2
 
 BAUD_RATE = 115200
 
+# FIXME:SOLID: This class violates SRP by handling UI, experiment logic, and hardware communication. Should be split into smaller classes.
 class ArduinoControlApp(QtWidgets.QMainWindow):
     def __init__(self, pins_config_file, experiment_folder='', with_neopixels=False, n_trials=20,
                  inter_trial_interval=10000, stage='S1', transition=False, subject_info=None):
@@ -55,6 +56,7 @@ class ArduinoControlApp(QtWidgets.QMainWindow):
             'S2': BeatBoxExperimentManagerS2,
             'S3': BeatBoxExperimentManagerS3
         }
+        # FIXME:SOLID: This stage selection logic violates OCP. Adding new stages requires modifying this code.
         if stage in manager_classes:
             self.experiment_manager = manager_classes[stage](experiment_folder, self.communicator, main_window=self, subject_info=subject_info)
         else:
@@ -100,6 +102,7 @@ class ArduinoControlApp(QtWidgets.QMainWindow):
         self._folder_selected = False
 
     def connect_signal_from_experiment_manager(self):
+        # FIXME:SOLID: This method assumes experiment_manager has specific signals/attributes, violating LSP and ISP.
         self.experiment_manager.sensorsStateChanged.connect(self._paint_sensor_leds)
         self.experiment_manager.actuatorsStateChanged.connect(self._paint_actuator_leds)
         self.experiment_manager.stageEnded.connect(self.handle_stage_end)
@@ -434,6 +437,7 @@ class ArduinoControlApp(QtWidgets.QMainWindow):
         logger.debug("Stopping experiment.")
 
     def handle_stage_end(self, reason: str):
+        # FIXME:SOLID: This method handles experiment logic and UI transitions, violating SRP. Should delegate to separate controller/manager.
         if not self.enable_transitions:
             return
         match reason:
@@ -602,6 +606,7 @@ class ArduinoControlApp(QtWidgets.QMainWindow):
             Optional list of boolean values indicating which pins should be set to ON.
             If None, the current state of the actuator controls will be used.
         """
+        # FIXME:SOLID: This method mixes UI state, hardware logic, and experiment logic. Violates SRP and DIP.
         if not isinstance(checked_pins, (list, tuple)):
             checked_pins = None  # A status value was passed instead. Overwrite
         logger.debug(f'Sending set command with checked pins: {checked_pins}')
@@ -731,6 +736,7 @@ class StageSelectDialog(QtWidgets.QDialog):
         self.setWindowTitle("Select Experiment Stage")
         layout = QtWidgets.QVBoxLayout(self)
         self.combo = QtWidgets.QComboBox()
+        # FIXME:SOLID: Hardcoded stage names. Consider using an enum or abstraction for stages (OCP).
         self.combo.addItems(["All", "S1", "S2", "S3"]) # FIXME: maybe use enum for stages instead
         layout.addWidget(QtWidgets.QLabel("Choose experiment stage:"))
         layout.addWidget(self.combo)
