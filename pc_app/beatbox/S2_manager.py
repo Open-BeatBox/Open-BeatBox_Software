@@ -63,7 +63,6 @@ class BeatBoxExperimentManagerS2(BeatBoxExperimentManagerS1):
         self.response_side = None
         self.tunnel_entered = False
         self._touch_result = None
-        self._pellet_retrieval_timestamp = 0
         self._screen_side = None
         self._last_trial_side = None
         self._last_response_type = None
@@ -79,7 +78,7 @@ class BeatBoxExperimentManagerS2(BeatBoxExperimentManagerS1):
         # Timestamps for logging
         self._stimulus_show_ts = None  # Timestamp when stimulus is shown
         self._screen_touch_ts = None
-        self._reward_collect_ts = None
+        self._pellet_retrieval_ts = None
         # FIXME: should not be here, this is the adapter between pins_config and the experiment configspec
         self.screen_pattern_suffixes = {
             'w': "_White_pattern",
@@ -261,8 +260,6 @@ class BeatBoxExperimentManagerS2(BeatBoxExperimentManagerS1):
 
     def _phase_wait_pellet_retrieval(self):
         super()._phase_wait_pellet_retrieval()
-        # Record the timestamp of reward collection (in ms since experiment start)
-        self._reward_collect_ts = int(time.time() * 1000)
         self.corrective_loop_count = 0  # reset for next trial
         self.correctiveLoopUpdated.emit(self.corrective_loop_count)
 
@@ -296,10 +293,10 @@ class BeatBoxExperimentManagerS2(BeatBoxExperimentManagerS1):
         self.log(log_levels[response_type], f"{response_type.title()} response on {pin_name}.")
 
     def handle_pellet_retrieved(self):
-        self._pellet_retrieval_timestamp = time.time() * 1000  # ms
+        self._pellet_retrieval_ts = time.time() * 1000  # ms
         # Only update if last response was correct
         if self._last_trial_side and self._last_response_type == 'correct':
-            delay = self._pellet_retrieval_timestamp - self._screen_touch_ts
+            delay = self._pellet_retrieval_ts - self._screen_touch_ts
             time_pressure = int(self.config.time_pressure_ms)
             responses = self.left_responses if self._last_trial_side == 'l' else self.right_responses
             if delay <= time_pressure:
@@ -490,12 +487,12 @@ class BeatBoxExperimentManagerS2(BeatBoxExperimentManagerS1):
             right_performance=self.get_right_performance(),
             show_stim_ts=self._stimulus_show_ts,
             screen_touch_ts=self._screen_touch_ts,
-            reward_collect_ts=self._reward_collect_ts
+            reward_collect_ts=self._pellet_retrieval_ts
         )
         # Reset timestamps for next trial
         self._stimulus_show_ts = None
         self._screen_touch_ts = None
-        self._reward_collect_ts = None
+        self._pellet_retrieval_ts = None
 
     def log_experiment_data(self, full=False):
         left_performance = self.get_left_performance()
