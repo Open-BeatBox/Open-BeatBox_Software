@@ -128,7 +128,8 @@ class BeatBoxExperimentManagerS1(BaseExperimentManager):
         payload = self.actuator_pins_cfg.mask()  # screens off
         self.emit_payload_ready(payload)
 
-        self.log(logging.DEBUG, f'Starting trial {self.n_pellets_retrieved + 1} of {self.config.n_trials}')
+        if self.stage_number == 'S1':
+            self.log(logging.DEBUG, f'Starting trial {self.n_pellets_retrieved + 1} of {self.config.n_trials}')
 
     def _phase_done(self):
         self.log(logging.INFO, f'{self.config.s_level} Experiment done.\n'
