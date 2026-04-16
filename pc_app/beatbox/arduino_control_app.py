@@ -24,7 +24,7 @@ import qdarkstyle
 from beatbox.bb_logging import qt_handler, logger
 from beatbox.experiment_managers import SubjectInfo
 from beatbox.S1_manager import BeatBoxExperimentManagerS1
-from beatbox.S2_manager import BeatBoxExperimentManagerS2
+from beatbox.S2_manager import BeatBoxExperimentManagerS2, PerformanceData
 from beatbox.S3_manager import BeatBoxExperimentManagerS3
 
 from beatbox.qt_utils import LEDIndicator
@@ -111,8 +111,9 @@ class ArduinoControlApp(QtWidgets.QMainWindow):
                 lambda current, total: (self.s1_current_trial_value_label.setText(str(current))))
         if self.experiment_manager.stage_number >= 2:
             self.experiment_manager.performanceUpdated.connect(self._update_performance)
-            self.experiment_manager.correctiveLoopUpdated.connect(self._update_corrective_loop)
             self.experiment_manager.trialNumbersUpdated.connect(self._update_trial_numbers)
+        if self.experiment_manager.stage_number >= 3:
+            self.experiment_manager.correctiveLoopUpdated.connect(self._update_corrective_loop)
         self.experiment_manager.phaseChanged.connect(self._update_phase_label)
         self.experiment_manager.stageChanged.connect(self._update_stage_label)
         self.experiment_manager.pelletDeliveryAlert.connect(self._handle_pellet_delivery_alert)
@@ -170,13 +171,17 @@ class ArduinoControlApp(QtWidgets.QMainWindow):
 
         experiment_layout.addWidget(overall_group)
 
-        ###### S2 experiment specific widgets
+        ###### Experiment specific widgets
         if self.experiment_manager.stage_number == 1:
             experiment_data_group = self._ui_setup_s1_data()
-        else:
+        elif self.experiment_manager.stage_number == 2:
             s2_experiment_group = self._ui_setup_s2_controller()
             experiment_data_group = self._ui_setup_s2_data()
             experiment_layout.addWidget(s2_experiment_group)
+        elif self.experiment_manager.stage_number == 3:
+            s3_experiment_group = self._ui_setup_s2_controller()
+            experiment_data_group = self._ui_setup_s3_data()
+            experiment_layout.addWidget(s3_experiment_group)
 
         experiment_data_group.setObjectName("experiment_data_group")
         experiment_layout.addWidget(experiment_data_group)
@@ -257,42 +262,69 @@ class ArduinoControlApp(QtWidgets.QMainWindow):
         experiment_layout.addWidget(s2_experiment_group)
         experiment_layout.addWidget(experiment_data_group)
 
+    def _ui_update_s2_to_s3(self):
+        """
+        Remove S2-specific widgets and add S3-specific widgets and data group.
+        """
+        experiment_group = self.findChild(QtWidgets.QGroupBox, "experiment_group")
+        if not experiment_group:
+            return
+        experiment_layout = experiment_group.layout()
+        # Remove experiment_data_group if present
+        for i in range(experiment_layout.count()):
+            item = experiment_layout.itemAt(i)
+            widget = item.widget()
+            if widget and widget.objectName() == "experiment_data_group":
+                experiment_layout.removeWidget(widget)
+                widget.setParent(None)
+                break
+        # Add S3-specific widgets
+        experiment_data_group = self._ui_setup_s3_data()
+        experiment_data_group.setObjectName("experiment_data_group")
+        experiment_layout.addWidget(experiment_data_group)
+
     def _ui_setup_s2_data(self):
-        # Experiment Data group
+        # Experiment Data group (S2 only)
         s2_data_group = QtWidgets.QGroupBox("Experiment Data")
         s2_data_layout = QtWidgets.QVBoxLayout(s2_data_group)
 
-        # Performance row
+        # Performance row (S2: only overall)
         performance_layout = QtWidgets.QHBoxLayout()
-        left_label = QtWidgets.QLabel("Left performance:")
-        self.left_value_label = QtWidgets.QLabel(f"{0:.2f}")
-        self.left_value_label.setTextInteractionFlags(QtCore.Qt.TextSelectableByMouse)
-        performance_layout.addWidget(left_label)
-        performance_layout.addWidget(self.left_value_label)
-        right_label = QtWidgets.QLabel("Right performance:")
-        self.right_value_label = QtWidgets.QLabel(f"{0:.2f}")
-        self.right_value_label.setTextInteractionFlags(QtCore.Qt.TextSelectableByMouse)
-        performance_layout.addWidget(right_label)
-        performance_layout.addWidget(self.right_value_label)
+        overall_label = QtWidgets.QLabel("Overall performance:")
+        self.overall_value_label = QtWidgets.QLabel(f"{0:.2f}")
+        self.overall_value_label.setTextInteractionFlags(QtCore.Qt.TextSelectableByMouse)
+        performance_layout.addWidget(overall_label)
+        performance_layout.addWidget(self.overall_value_label)
+        self.left_value_label = None
+        self.right_value_label = None
         s2_data_layout.addLayout(performance_layout)
 
         # Trial info row
         trial_info_layout = QtWidgets.QHBoxLayout()
+        # Total trials
         total_trials_label = QtWidgets.QLabel("Total trials:")
         self.total_trials_value_label = QtWidgets.QLabel("0")
         self.total_trials_value_label.setTextInteractionFlags(QtCore.Qt.TextSelectableByMouse)
         trial_info_layout.addWidget(total_trials_label)
         trial_info_layout.addWidget(self.total_trials_value_label)
-        correct_count_label = QtWidgets.QLabel("Correct responses count:")
-        self.correct_count_value_label = QtWidgets.QLabel("0")
-        self.correct_count_value_label.setTextInteractionFlags(QtCore.Qt.TextSelectableByMouse)
-        trial_info_layout.addWidget(correct_count_label)
-        trial_info_layout.addWidget(self.correct_count_value_label)
-        corrective_loop_label = QtWidgets.QLabel("Corrective loop count:")
-        self.corrective_loop_value_label = QtWidgets.QLabel("0")
-        self.corrective_loop_value_label.setTextInteractionFlags(QtCore.Qt.TextSelectableByMouse)
-        trial_info_layout.addWidget(corrective_loop_label)
-        trial_info_layout.addWidget(self.corrective_loop_value_label)
+        # Valid & correct trials (against time pressure)
+        valid_correct_label = QtWidgets.QLabel("Valid & correct trials:")
+        self.valid_correct_value_label = QtWidgets.QLabel("0")
+        self.valid_correct_value_label.setTextInteractionFlags(QtCore.Qt.TextSelectableByMouse)
+        trial_info_layout.addWidget(valid_correct_label)
+        trial_info_layout.addWidget(self.valid_correct_value_label)
+        # Left screen touches
+        left_touches_label = QtWidgets.QLabel("Left touches:")
+        self.left_touches_value_label = QtWidgets.QLabel("0")
+        self.left_touches_value_label.setTextInteractionFlags(QtCore.Qt.TextSelectableByMouse)
+        trial_info_layout.addWidget(left_touches_label)
+        trial_info_layout.addWidget(self.left_touches_value_label)
+        # Right screen touches
+        right_touches_label = QtWidgets.QLabel("Right touches:")
+        self.right_touches_value_label = QtWidgets.QLabel("0")
+        self.right_touches_value_label.setTextInteractionFlags(QtCore.Qt.TextSelectableByMouse)
+        trial_info_layout.addWidget(right_touches_label)
+        trial_info_layout.addWidget(self.right_touches_value_label)
         s2_data_layout.addLayout(trial_info_layout)
         return s2_data_group
 
@@ -332,6 +364,53 @@ class ArduinoControlApp(QtWidgets.QMainWindow):
         s2_layout.addWidget(QtWidgets.QLabel("Learning threshold:"))
         s2_layout.addWidget(self.learning_threshold_spinbox)
         return s2_experiment_group
+
+    def _ui_setup_s3_data(self):
+        """
+        Creates and returns a QWidget for S3 experiment data, showing left and right performance fields.
+        """
+        s3_data_group = QtWidgets.QGroupBox("Experiment Data")
+        s3_data_layout = QtWidgets.QVBoxLayout(s3_data_group)
+
+        # Performance row
+        performance_layout = QtWidgets.QHBoxLayout()
+        left_label = QtWidgets.QLabel("Left performance:")
+        self.left_value_label = QtWidgets.QLabel(f"{0:.2f}")
+        self.left_value_label.setTextInteractionFlags(QtCore.Qt.TextSelectableByMouse)
+        performance_layout.addWidget(left_label)
+        performance_layout.addWidget(self.left_value_label)
+        right_label = QtWidgets.QLabel("Right performance:")
+        self.right_value_label = QtWidgets.QLabel(f"{0:.2f}")
+        self.right_value_label.setTextInteractionFlags(QtCore.Qt.TextSelectableByMouse)
+        performance_layout.addWidget(right_label)
+        performance_layout.addWidget(self.right_value_label)
+        self.overall_value_label = None
+        s3_data_layout.addLayout(performance_layout)
+
+        # Trial info row
+        trial_info_layout = QtWidgets.QHBoxLayout()
+        total_trials_label = QtWidgets.QLabel("Total trials:")
+        self.total_trials_value_label = QtWidgets.QLabel("0")
+        self.total_trials_value_label.setTextInteractionFlags(QtCore.Qt.TextSelectableByMouse)
+        trial_info_layout.addWidget(total_trials_label)
+        trial_info_layout.addWidget(self.total_trials_value_label)
+        valid_correct_label = QtWidgets.QLabel("Valid & correct trials:")
+        self.valid_correct_value_label = QtWidgets.QLabel("0")
+        self.valid_correct_value_label.setTextInteractionFlags(QtCore.Qt.TextSelectableByMouse)
+        trial_info_layout.addWidget(valid_correct_label)
+        trial_info_layout.addWidget(self.valid_correct_value_label)
+        correct_count_label = QtWidgets.QLabel("Correct responses count:")
+        self.correct_count_value_label = QtWidgets.QLabel("0")
+        self.correct_count_value_label.setTextInteractionFlags(QtCore.Qt.TextSelectableByMouse)
+        trial_info_layout.addWidget(correct_count_label)
+        trial_info_layout.addWidget(self.correct_count_value_label)
+        corrective_loop_label = QtWidgets.QLabel("Corrective loop count:")
+        self.corrective_loop_value_label = QtWidgets.QLabel("0")
+        self.corrective_loop_value_label.setTextInteractionFlags(QtCore.Qt.TextSelectableByMouse)
+        trial_info_layout.addWidget(corrective_loop_label)
+        trial_info_layout.addWidget(self.corrective_loop_value_label)
+        s3_data_layout.addLayout(trial_info_layout)
+        return s3_data_group
 
     def __setup_actuators(self, main_layout):
         actuators_group = QtWidgets.QGroupBox("Actuators")
@@ -378,14 +457,12 @@ class ArduinoControlApp(QtWidgets.QMainWindow):
         title = pin_name.replace("_", " ").replace("left ", "").replace("right ", "").title()
 
         if pin_name.startswith("left_"):
-            widget = QtWidgets.QRadioButton(title)
-            self.left_button_group.addButton(widget)
-            widget.toggled.connect(lambda checked: self.send_set_command() if checked else None)
+            widget = QtWidgets.QCheckBox(title)
+            widget.stateChanged.connect(self.send_set_command)
             self.left_buttons.append(widget)  # TODO: maybe dictionary with pattern number
         elif pin_name.startswith("right_"):
-            widget = QtWidgets.QRadioButton(title)
-            self.right_button_group.addButton(widget)
-            widget.toggled.connect(lambda checked: self.send_set_command() if checked else None)
+            widget = QtWidgets.QCheckBox(title)
+            widget.stateChanged.connect(self.send_set_command)
             self.right_buttons.append(widget)
         else:
             if pin_name == 'reward':
@@ -476,6 +553,7 @@ class ArduinoControlApp(QtWidgets.QMainWindow):
                 )
                 self.experiment_manager.deleteLater()
                 self.experiment_manager = s3_manager
+                self._ui_update_s2_to_s3()
                 self._ui_update_base_experiment_params()
                 self.connect_signal_from_experiment_manager()
                 self.experiment_manager.link_widgets()
@@ -609,7 +687,6 @@ class ArduinoControlApp(QtWidgets.QMainWindow):
         # FIXME:SOLID: This method mixes UI state, hardware logic, and experiment logic. Violates SRP and DIP.
         if not isinstance(checked_pins, (list, tuple)):
             checked_pins = None  # A status value was passed instead. Overwrite
-        logger.debug(f'Sending set command with checked pins: {checked_pins}')
         ordered_pin_names = self.experiment_manager.actuator_pins_cfg.pin_names
         if checked_pins is None:
             checked_pins = [self.actuators_controls[name].isChecked() for name in ordered_pin_names]
@@ -622,6 +699,7 @@ class ArduinoControlApp(QtWidgets.QMainWindow):
         if checked_pins[0]:
             # FIXME: reward delivery should be handled by the firmware
             QtCore.QTimer.singleShot(self.experiment_manager.reward_duration, self.send_set_command)
+        logger.debug(f'Sending set command with checked pins: {checked_pins}')
         self.experiment_manager.request_manual_action_by_pins_and_rgb(checked_pins, self.get_rgb_values())
 
     @QtCore.Slot(list)
@@ -655,25 +733,57 @@ class ArduinoControlApp(QtWidgets.QMainWindow):
             self.error_flash_spinbox.setValue(self.experiment_manager.config.error_flash_ms)
             self.learning_threshold_spinbox.setValue(self.experiment_manager.config.learning_threshold)
 
-    def _update_performance(self, left_performance: float, right_performance: float):
-        self.left_value_label.setText(f"{left_performance:.2f}")
-        self.right_value_label.setText(f"{right_performance:.2f}")
+    def _update_performance(self, perf: PerformanceData):
+        if self.experiment_manager.stage_number == 2:
+            val = perf.overall if perf.overall is not None else 0.0
+            if self.overall_value_label:
+                self.overall_value_label.setText(f"{val:.2f}")
+        else:
+            left = perf.left if perf.left is not None else perf.overall
+            right = perf.right if perf.right is not None else perf.overall
+            if self.left_value_label:
+                self.left_value_label.setText(f"{left:.2f}" if left is not None else "-")
+            if self.right_value_label:
+                self.right_value_label.setText(f"{right:.2f}" if right is not None else "-")
 
     def _update_corrective_loop(self, corrective_count: int):
         self.corrective_loop_value_label.setText(str(corrective_count))
 
+    # FIXME:SOLID: tightly coupled to experiment manager, does not use the signal slot pattern efficiently
     def _update_trial_numbers(self, correct_count: int, total_trials: int):
-        self.correct_count_value_label.setText(str(correct_count))
+        # Update total trials
         self.total_trials_value_label.setText(str(total_trials))
+        # Update valid & correct trials
+        if hasattr(self, 'valid_correct_value_label'):
+            valid_correct = getattr(self.experiment_manager, 'total_correct_trials', 0)
+            self.valid_correct_value_label.setText(str(valid_correct))
+        # Update left/right touches if present
+        if (hasattr(self, 'left_touches_value_label')
+                and hasattr(self, 'right_touches_value_label')):
+                #and self.experiment_manager.stage_number == 2):
+            left_touches = getattr(self.experiment_manager, 'left_touches', 0)
+            right_touches = getattr(self.experiment_manager, 'right_touches', 0)
+            self.left_touches_value_label.setText(str(left_touches))
+            self.right_touches_value_label.setText(str(right_touches))
+        # Update correct count if present
+        if hasattr(self, 'correct_count_value_label'):
+            self.correct_count_value_label.setText(str(correct_count))
 
     def _reset_performance_gui(self):
-        """Reset performance and trial GUI fields to initial state when transitioning stages."""
-        self.left_value_label.setText(f"{0:.2f}")
-        self.right_value_label.setText(f"{0:.2f}")
+        if self.experiment_manager.stage_number == 2:
+            if self.overall_value_label:
+                self.overall_value_label.setText(f"{0:.2f}")
+        else:
+            if self.left_value_label:
+                self.left_value_label.setText(f"{0:.2f}")
+            if self.right_value_label:
+                self.right_value_label.setText(f"{0:.2f}")
         self.total_trials_value_label.setText("0")
         self.correct_count_value_label.setText("0")
         self.corrective_loop_value_label.setText("0")
         # If there are other fields to reset, add them here
+        if getattr(self, 'valid_correct_value_label', None) is not None:
+            self.valid_correct_value_label.setText("0")
 
     def _update_experiment_state_btn(self):
         self.experiment_state_btn.setEnabled(self._serial_connected and self._folder_selected)

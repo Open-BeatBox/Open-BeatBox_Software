@@ -5,7 +5,7 @@ from collections import deque
 from pathlib import Path
 import time
 
-from typing import Dict, Any, List, Optional
+from typing import Dict, Any, List, Optional, NamedTuple
 
 from qtpy import QtCore
 
@@ -34,6 +34,16 @@ from beatbox.experiment_managers import Phase, PhaseSpec, Edge
 from beatbox.utils import PinConfig, PATTERN_LUT, bitmask_from_pattern, get_pin_names_from_pattern, PATTERN_ID
 
 
+from dataclasses import dataclass
+
+# Flexible performance data structure
+@dataclass
+class PerformanceData:
+    overall: float = None
+    left: float = None
+    right: float = None
+
+
 class BeatBoxExperimentManagerS2(BeatBoxExperimentManagerS1):
     """
     Stage 2 experiment manager.
@@ -46,7 +56,7 @@ class BeatBoxExperimentManagerS2(BeatBoxExperimentManagerS1):
     """
     stage_number = 2
 
-    performanceUpdated = QtCore.Signal(float, float)
+    performanceUpdated = QtCore.Signal(object)
     correctiveLoopUpdated = QtCore.Signal(int)
 
     def __init__(self, experiment_folder, communicator,
@@ -66,6 +76,9 @@ class BeatBoxExperimentManagerS2(BeatBoxExperimentManagerS1):
         self._screen_side = None
         self._last_trial_side = None
         self._last_response_type = None
+        # Track left/right touches for S2
+        self.left_touches = 0
+        self.right_touches = 0
         # Store only the last N responses, where N = n_trials from config
         self.config = S2Config(Path(__file__).parent)
         self.config.load()
@@ -252,7 +265,7 @@ class BeatBoxExperimentManagerS2(BeatBoxExperimentManagerS1):
 
     def _stop_flash(self):
         self.set_outputs(off=get_pin_names_from_pattern(PATTERN_ID.FULL_WHITE, 'both'),
-                         flatten=False, flush=False)
+                         flatten=True, flush=False)
         self.corrective_loop_count += 1
         self.total_corrective_loop_trials += 1
         self.correctiveLoopUpdated.emit(self.corrective_loop_count)
@@ -271,6 +284,11 @@ class BeatBoxExperimentManagerS2(BeatBoxExperimentManagerS1):
         self._last_trial_side = self.get_screen_side()
         self._last_response_type = response_type
         self.total_trials += 1
+        # Track left/right touches
+        if pin_name.startswith('left_'):
+            self.left_touches += 1
+        elif pin_name.startswith('right_'):
+            self.right_touches += 1
         # Record the timestamp of the screen touch (in ms since experiment start)
         self._screen_touch_ts = int(time.time() * 1000)
         if response_type == 'correct':
@@ -286,7 +304,12 @@ class BeatBoxExperimentManagerS2(BeatBoxExperimentManagerS1):
                 self.right_responses.append('incorrect')
             # Update performance and GUI after incorrect response
             self.compute_performance()
-            self.performanceUpdated.emit(self.get_left_performance(), self.get_right_performance())
+            perf = PerformanceData(
+                left=self.get_left_performance(),
+                right=self.get_right_performance(),
+                overall=self.get_overall_performance()
+            )
+            self.performanceUpdated.emit(perf)
             self.trialNumbersUpdated.emit(self.get_correct_count(), self.get_total_trial_count())
 
         log_levels = {'correct': logging.INFO, 'incorrect': logging.INFO}
@@ -316,9 +339,17 @@ class BeatBoxExperimentManagerS2(BeatBoxExperimentManagerS1):
             ## TODO: find a more flexible to display either overall performance or side performances
             ## This is a quick hack to not update the GUI fields
             if self.stage_number == 2:
-                self.performanceUpdated.emit(self.get_overall_performance(), self.get_overall_performance())
+                perf = PerformanceData(
+                    overall=self.get_overall_performance()
+                )
+                self.performanceUpdated.emit(perf)
             else:
-                self.performanceUpdated.emit(self.get_left_performance(), self.get_right_performance())
+                perf = PerformanceData(
+                    left=self.get_left_performance(),
+                    right=self.get_right_performance(),
+                    overall=self.get_overall_performance()
+                )
+                self.performanceUpdated.emit(perf)
             self.trialNumbersUpdated.emit(self.get_correct_count(), self.get_total_trial_count())
         # Reset last response info
         self._last_trial_side = None
@@ -514,22 +545,6 @@ class BeatBoxExperimentManagerS2(BeatBoxExperimentManagerS1):
 
     def set_experiment_folder(self, experiment_folder):
         super().set_experiment_folder(experiment_folder)
-
-    def handle_error_flash_ms_changed(self, value):
-        if value is None:
-            return
-        self.inter_trial_interval = value
-        self.config.set('error_flash_ms', value)
-        self.config.write()
-        self._phase_table[Phase.INCORRECT_RESPONSE].set_timeout(value)
-
-    def handle_corrective_loop_timeout_changed(self, value):
-        if value is None:
-            return
-        self.inter_trial_interval = value
-        self.config.set('corrective_loop_timeout', value)
-        self.config.write()
-        self._phase_table[Phase.STOP_FLASH].set_timeout(value)
 
     def _goto(self, phase: Phase, *, extra_ms: int = 0):
         super()._goto(phase, extra_ms=extra_ms)
