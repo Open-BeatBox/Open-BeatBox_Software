@@ -759,8 +759,8 @@ class ArduinoControlApp(QtWidgets.QMainWindow):
             self.valid_correct_value_label.setText(str(valid_correct))
         # Update left/right touches if present
         if (hasattr(self, 'left_touches_value_label')
-                and hasattr(self, 'right_touches_value_label')):
-                #and self.experiment_manager.stage_number == 2):
+                and hasattr(self, 'right_touches_value_label')
+                and self.experiment_manager.stage_number == 2):
             left_touches = getattr(self.experiment_manager, 'left_touches', 0)
             right_touches = getattr(self.experiment_manager, 'right_touches', 0)
             self.left_touches_value_label.setText(str(left_touches))

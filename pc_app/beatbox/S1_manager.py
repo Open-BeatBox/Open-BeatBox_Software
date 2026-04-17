@@ -41,8 +41,14 @@ class BeatBoxExperimentManagerS1(BaseExperimentManager):
         self.config.load()
 
         # ----------------- phase table -----------------------------------
-        self._phase_table_initial = Phase.ITI
+        self._phase_table_initial = Phase.INIT
         self._phase_table = {
+            Phase.INIT: PhaseSpec(
+                on_enter=self._phase_init,
+                next_phase_default=Phase.ITI,
+                timeout_ms=0,
+                relevant_pins=None
+            ),
             Phase.ITI: PhaseSpec(
                 on_enter=self._phase_iti,
                 next_phase_default=Phase.DELIVER_PELLET,
@@ -81,6 +87,13 @@ class BeatBoxExperimentManagerS1(BaseExperimentManager):
                 relevant_pins=None
             )
         }
+
+    def _phase_init(self):
+        self.log(logging.INFO, f'Starting stage {self.config.s_level}.')
+        self.log(logging.INFO, f'Config used: \n{self.config.as_string()}')
+        if self.subject_info is not None:
+            self.log(logging.INFO, f'{self.subject_info.as_string()}')
+
 
     def _phase_iti(self):
         # TODO: check which one between defaults and screens off is more relevant

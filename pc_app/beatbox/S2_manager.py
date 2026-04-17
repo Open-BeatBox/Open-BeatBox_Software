@@ -99,8 +99,14 @@ class BeatBoxExperimentManagerS2(BeatBoxExperimentManagerS1):
             'v': "_V_lines_pattern",
             'h': "_H_lines_pattern",
         }
-        self._phase_table_initial = Phase.ITI
+        self._phase_table_initial = Phase.INIT
         self._phase_table = {
+            Phase.INIT: PhaseSpec(
+                on_enter=self._phase_init,
+                next_phase_default=Phase.ITI,
+                timeout_ms=0,
+                relevant_pins=None
+            ),
             Phase.ITI: PhaseSpec(
                 on_enter=self._phase_iti,
                 next_phase_default=Phase.WAIT_TUNNEL,

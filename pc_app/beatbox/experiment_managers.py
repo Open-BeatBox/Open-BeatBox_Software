@@ -52,6 +52,10 @@ class SubjectInfo:
         self.sex = sex
         self.light_cycle = light_cycle
 
+    def as_string(self) -> str:
+        return (f"Subject Info: ID={self.subject_id}, Weight={self.weight}g, Box={self.box}, "
+                f"Sex={self.sex}, Light Cycle={self.light_cycle}")
+
 
 class SConfig:
     s_level: str = 'S0'
@@ -117,6 +121,22 @@ class SConfig:
                 self._config[attribute] = value
         setattr(self, attribute, value)
 
+    def as_string(self) -> str:
+        """
+        Return the relevant stage config as a string, suitable for logging.
+        Only includes the section matching self.s_level.
+        """
+        if self._config is None:
+            return "[SConfig] Config not loaded."
+        section = self.s_level
+        if section in self._config and isinstance(self._config[section], dict):
+            lines = [f"[{section}]"]
+            for k, v in self._config[section].items():
+                lines.append(f"{k} = {v}")
+            return "\n".join(lines)
+        else:
+            return f"[{section}] section not found in config."
+
 
 class Edge(Enum):
     RISING = 'rising'
@@ -137,6 +157,7 @@ class Phase(Enum):
     Each phase corresponds to a specific state in the experiment flow.
     Add new phases here as needed for the experiment.
     """
+    INIT = auto()
     ITI = auto()
     WAIT_TUNNEL = auto()
     DELIVER_PELLET = auto()
