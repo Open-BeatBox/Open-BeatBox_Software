@@ -26,6 +26,7 @@ from beatbox.experiment_managers import SubjectInfo
 from beatbox.S1_manager import BeatBoxExperimentManagerS1
 from beatbox.S2_manager import BeatBoxExperimentManagerS2, PerformanceData
 from beatbox.S3_manager import BeatBoxExperimentManagerS3
+from beatbox.S4_manager import BeatBoxExperimentManagerS4
 
 from beatbox.qt_utils import LEDIndicator
 from beatbox.serial_com import get_platform_serial_ports, BeatBoxCommunicator, BeatBoxMessage, HandshakeWorker
@@ -54,7 +55,8 @@ class ArduinoControlApp(QtWidgets.QMainWindow):
         manager_classes = {
             'S1': BeatBoxExperimentManagerS1,
             'S2': BeatBoxExperimentManagerS2,
-            'S3': BeatBoxExperimentManagerS3
+            'S3': BeatBoxExperimentManagerS3,
+            'S4': BeatBoxExperimentManagerS4
         }
         # FIXME:SOLID: This stage selection logic violates OCP. Adding new stages requires modifying this code.
         if stage in manager_classes:
@@ -178,7 +180,7 @@ class ArduinoControlApp(QtWidgets.QMainWindow):
             s2_experiment_group = self._ui_setup_s2_controller()
             experiment_data_group = self._ui_setup_s2_data()
             experiment_layout.addWidget(s2_experiment_group)
-        elif self.experiment_manager.stage_number == 3:
+        elif self.experiment_manager.stage_number in (3, 4):
             s3_experiment_group = self._ui_setup_s2_controller()
             experiment_data_group = self._ui_setup_s3_data()
             experiment_layout.addWidget(s3_experiment_group)
@@ -559,6 +561,27 @@ class ArduinoControlApp(QtWidgets.QMainWindow):
                 self.experiment_manager.link_widgets()
                 self.experiment_manager.start_experiment()
                 self._reset_performance_gui()
+            case 'S3':
+                self.append_log(
+                    f"Stage {self.experiment_manager.config.s_level} Complete. "
+                    "Stage S3 complete. Moving to Stage S4.",
+                    logging.INFO
+                )
+                s3_folder = self.experiment_manager.experiment_folder
+                s4_manager = BeatBoxExperimentManagerS4(
+                    s3_folder,
+                    self.communicator,
+                    main_window=self,
+                    subject_info=self.subject_info
+                )
+                self.experiment_manager.deleteLater()
+                self.experiment_manager = s4_manager
+                self._ui_update_s2_to_s3()  # FIXME: S4 uses S3 widgets for now
+                self._ui_update_base_experiment_params()
+                self.connect_signal_from_experiment_manager()
+                self.experiment_manager.link_widgets()
+                self.experiment_manager.start_experiment()
+                self._reset_performance_gui()
             case _:
                 QtWidgets.QMessageBox.information(
                     self, f"Stage {self.experiment_manager.config.s_level} Complete",
@@ -847,7 +870,7 @@ class StageSelectDialog(QtWidgets.QDialog):
         layout = QtWidgets.QVBoxLayout(self)
         self.combo = QtWidgets.QComboBox()
         # FIXME:SOLID: Hardcoded stage names. Consider using an enum or abstraction for stages (OCP).
-        self.combo.addItems(["All", "S1", "S2", "S3"]) # FIXME: maybe use enum for stages instead
+        self.combo.addItems(["All", "S1", "S2", "S3", "S4"]) # FIXME: maybe use enum for stages instead
         layout.addWidget(QtWidgets.QLabel("Choose experiment stage:"))
         layout.addWidget(self.combo)
         # Animal info fields

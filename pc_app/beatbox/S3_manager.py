@@ -41,9 +41,6 @@ class BeatBoxExperimentManagerS3(BeatBoxExperimentManagerS2):
             return 'incomplete'
 
     def check_performance(self):
-        """ S3 end is triggered manually by the experimenter, so we don't check performance here. """
-        return False
-
         """ Overrides S2 method to check both side"""
         left_performance = self.get_left_performance()
         right_performance = self.get_right_performance()

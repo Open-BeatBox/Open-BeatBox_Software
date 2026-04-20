@@ -135,7 +135,7 @@ class BeatBoxExperimentManagerS1(BaseExperimentManager):
 
     def _phase_wait_pellet_retrieval(self):
         self.waiting_for_pellet_retrieval = True
-        self.trial_no += 1
+        self._go_to_next_trial()
         self.pellet_delivery_loop_count = 0  # reset for next trial
         self.pelletDeliveryAlert.emit(self.pellet_delivery_loop_count)
         payload = self.actuator_pins_cfg.mask()  # screens off
@@ -143,6 +143,9 @@ class BeatBoxExperimentManagerS1(BaseExperimentManager):
 
         if self.stage_number == 'S1':
             self.log(logging.DEBUG, f'Starting trial {self.n_pellets_retrieved + 1} of {self.config.n_trials}')
+
+    def _go_to_next_trial(self):
+        self.trial_no += 1
 
     def _phase_done(self):
         self.log(logging.INFO, f'{self.config.s_level} Experiment done.\n'
