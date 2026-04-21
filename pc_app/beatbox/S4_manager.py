@@ -23,7 +23,7 @@ class S4Config(S2Config):
     left_screen_sequence: List[str]
     right_screen_sequence: List[str]
 
-    neutral_pattern: str
+    discovery_pattern: str
     reward_prob: float
 
 
@@ -44,26 +44,26 @@ class BeatBoxExperimentManagerS4(BeatBoxExperimentManagerS3):
         self._phase_table[Phase.WAIT_TOUCH] = PhaseSpec(
                 routes={'correct': Phase.CORRECT_RESPONSE,
                         'incorrect': Phase.INCORRECT_RESPONSE,
-                        'neutral': Phase.NEUTRAL_RESPONSE},
-                decide=lambda instance: instance._get_touch_valence(),  # 'correct'/'incorrect'/'neutral'/None
+                        'discovery': Phase.DISCOVERY_RESPONSE},
+                decide=lambda instance: instance._get_touch_valence(),  # 'correct'/'incorrect'/'discovery'/None
                 relevant_pins={'left_response': Edge.RISING,
                                'right_response': Edge.RISING}
         )
         # add new routes
         self._phase_table.update({
-            Phase.NEUTRAL_RESPONSE: PhaseSpec(
-                on_enter=self._phase_neutral_response,
+            Phase.DISCOVERY_RESPONSE: PhaseSpec(
+                on_enter=self._phase_discovery_response,
                 next_phase_default=Phase.ITI,
                 timeout_ms=self.config.error_flash_ms,  # same as incorrect for now
                 relevant_pins=None
             )
         })
 
-    def _phase_neutral_response(self):
+    def _phase_discovery_response(self):
         self._handle_screen_touch() #
         self.total_valid_trials += 1
         self._go_to_next_trial()
-        self.log(logging.DEBUG, f'Neutral response entry')
+        self.log(logging.DEBUG, f'discovery response entry')
 
     def check_response(self, pin_name):
         """
@@ -79,8 +79,8 @@ class BeatBoxExperimentManagerS4(BeatBoxExperimentManagerS3):
 
         if self.config.correct_pattern == self._get_pattern_from_side(side):
             result = 'correct'
-        elif self.config.neutral_pattern == self._get_pattern_from_side(side):
-            result = 'neutral'
+        elif self.config.discovery_pattern == self._get_pattern_from_side(side):
+            result = 'discovery'
         else:
             result = 'incorrect'
         self._touch_result = (result, pin_name)

@@ -167,7 +167,7 @@ class Phase(Enum):
     WAIT_TOUCH = auto()
     CORRECT_RESPONSE = auto()
     INCORRECT_RESPONSE = auto()
-    NEUTRAL_RESPONSE = auto()
+    DISCOVERY_RESPONSE = auto()
     STOP_FLASH = auto()  # used to stop flashing the error light
     DONE = auto()
 
