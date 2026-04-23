@@ -342,6 +342,7 @@ class BeatBoxExperimentManagerS2(BeatBoxExperimentManagerS1):
 
     def _handle_correct_response(self):
         """Turn screens off, drop pellet, wait ITI, start next trial."""
+        self._reward_left = 1
         self._handle_screen_touch()
         self.turn_off_screens()
 
@@ -449,7 +450,8 @@ class BeatBoxExperimentManagerS2(BeatBoxExperimentManagerS1):
                 correct_side = 'r'
             else:
                 correct_side = 'x'  # invalid
-                self.log(logging.ERROR, 'In advanced mode, left and right screen sequences must be complementary.')
+                if self.stage_number == 2:
+                    self.log(logging.ERROR, 'In advanced mode, left and right screen sequences must be complementary.')
         self._screen_side = correct_side
 
     def check_performance(self):

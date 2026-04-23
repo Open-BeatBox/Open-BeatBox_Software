@@ -10,6 +10,7 @@ from beatbox.utils import PinConfig
 class S4Config(S2Config):
     s_level = 'S4'
 
+    ## FIXME: code duplication, without this SConfig.load won't properly work
     n_trials: int
     inter_trial_interval: int
     learning_threshold: float
@@ -40,7 +41,8 @@ class BeatBoxExperimentManagerS4(BeatBoxExperimentManagerS3):
         self.config = S4Config(Path(__file__).parent)
         self.config.s_level = 'S4'  # For experiment.cfg section, but config spec is S4
         self.config.load()
-        # Placeholder for S4-specific phase table changes (e.g. custom WAIT_TOUCH)
+
+        self._reward_left = 0
         self._phase_table[Phase.WAIT_TOUCH] = PhaseSpec(
                 routes={'correct': Phase.CORRECT_RESPONSE,
                         'incorrect': Phase.INCORRECT_RESPONSE,
@@ -49,6 +51,7 @@ class BeatBoxExperimentManagerS4(BeatBoxExperimentManagerS3):
                 relevant_pins={'left_response': Edge.RISING,
                                'right_response': Edge.RISING}
         )
+
         # add new routes
         self._phase_table.update({
             Phase.DISCOVERY_RESPONSE: PhaseSpec(
