@@ -93,13 +93,6 @@ class BeatBoxExperimentManagerS2(BeatBoxExperimentManagerS1):
         self._stimulus_show_ts = None  # Timestamp when stimulus is shown
         self._screen_touch_ts = None
         self._pellet_retrieval_ts = None
-        # FIXME: should not be here, this is the adapter between pins_config and the experiment configspec
-        self.screen_pattern_suffixes = {
-            'w': "_White_pattern",
-            'b': "_Black_pattern",
-            'v': "_V_lines_pattern",
-            'h': "_H_lines_pattern",
-        }
         self._phase_table_initial = Phase.INIT
         self._phase_table = {
             Phase.INIT: PhaseSpec(
@@ -183,16 +176,6 @@ class BeatBoxExperimentManagerS2(BeatBoxExperimentManagerS1):
             )
         }
 
-    def _derive_pattern_name(self, side: str, pattern):
-        full_pattern = self.screen_pattern_suffixes[pattern]
-        match side:
-            case 'l':
-                return f'left{full_pattern}'
-            case 'r':
-                return f'right{full_pattern}'
-            case _:
-                raise ValueError(f'Could not derive pattern name for side {side}')  # supposedly never executed
-
     def _get_pattern_from_side(self, side: str):
         if self.config.advanced:
             if side == 'l':
@@ -210,13 +193,6 @@ class BeatBoxExperimentManagerS2(BeatBoxExperimentManagerS1):
                 return self.config.correct_pattern
             else:
                 return self.config.incorrect_pattern
-
-    def _get_current_pattern_name(self, side: str):
-        if side not in ('l', 'r'):
-            raise ValueError('Side name must be "l" or "r"')
-
-        pattern = self._get_pattern_from_side(side)
-        return self._derive_pattern_name(side, pattern)
 
     def _get_touch_valence(self):
         return self._touch_result[0] if self._touch_result is not None else None
