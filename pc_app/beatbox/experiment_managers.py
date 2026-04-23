@@ -168,6 +168,7 @@ class Phase(Enum):
     CORRECT_RESPONSE = auto()
     INCORRECT_RESPONSE = auto()
     DISCOVERY_RESPONSE = auto()
+    SUCCESS_ROLL = auto()  # specific to S4, reward in case of random success after discovery response
     STOP_FLASH = auto()  # used to stop flashing the error light
     DONE = auto()
 
