@@ -16,7 +16,7 @@ import warnings
 from pathlib import Path
 import logging
 
-from PyQt5.QtWidgets import QPushButton
+from PyQt5.QtWidgets import QPushButton, QGroupBox, QHBoxLayout, QVBoxLayout
 from configobj import ConfigObj
 from qtpy import QtWidgets, QtCore, QtGui
 import qdarkstyle
@@ -26,6 +26,7 @@ from beatbox.experiment_managers import SubjectInfo
 from beatbox.S1_manager import BeatBoxExperimentManagerS1
 from beatbox.S2_manager import BeatBoxExperimentManagerS2, PerformanceData
 from beatbox.S3_manager import BeatBoxExperimentManagerS3
+from beatbox.S3_1_manager import BeatBoxExperimentManagerS3_1
 from beatbox.S4_manager import BeatBoxExperimentManagerS4
 
 from beatbox.qt_utils import LEDIndicator
@@ -56,6 +57,7 @@ class ArduinoControlApp(QtWidgets.QMainWindow):
             'S1': BeatBoxExperimentManagerS1,
             'S2': BeatBoxExperimentManagerS2,
             'S3': BeatBoxExperimentManagerS3,
+            'S3.1': BeatBoxExperimentManagerS3_1,
             'S4': BeatBoxExperimentManagerS4
         }
         # FIXME:SOLID: This stage selection logic violates OCP. Adding new stages requires modifying this code.
@@ -184,6 +186,10 @@ class ArduinoControlApp(QtWidgets.QMainWindow):
             s3_experiment_group = self._ui_setup_s2_controller()
             experiment_data_group = self._ui_setup_s3_data()
             experiment_layout.addWidget(s3_experiment_group)
+        elif self.experiment_manager.stage_number == 3.1:
+            s3_experiment_group = self._ui_setup_s2_controller()
+            experiment_data_group = self._ui_setup_s3_1_data()
+            experiment_layout.addWidget(s3_experiment_group)
 
         experiment_data_group.setObjectName("experiment_data_group")
         experiment_layout.addWidget(experiment_data_group)
@@ -285,6 +291,37 @@ class ArduinoControlApp(QtWidgets.QMainWindow):
         experiment_data_group.setObjectName("experiment_data_group")
         experiment_layout.addWidget(experiment_data_group)
 
+    def _ui_update_s2_to_s3_1(self):
+        # remove corrective loop count as it is irrelevant in s3.1
+        experiment_group = self.findChild(QtWidgets.QGroupBox, "experiment_group")
+        if not experiment_group:
+            return
+        experiment_layout = experiment_group.layout()
+
+        # Remove current experiment data group first.
+        for i in range(experiment_layout.count()):
+            item = experiment_layout.itemAt(i)
+            widget = item.widget()
+            if widget and widget.objectName() == "experiment_data_group":
+                experiment_layout.removeWidget(widget)
+                widget.setParent(None)
+                break
+
+        # Reuse S3 data layout then drop the corrective-loop widgets for S3.1.
+        experiment_data_group = self._ui_setup_s3_data()
+        data_layout = experiment_data_group.layout()
+        if data_layout and data_layout.count() > 1:
+            trial_info_layout = data_layout.itemAt(1).layout()
+            if trial_info_layout and trial_info_layout.count() >= 2:
+                for _ in range(2):
+                    item = trial_info_layout.takeAt(trial_info_layout.count() - 1)
+                    if item and item.widget():
+                        item.widget().deleteLater()
+        self.corrective_loop_value_label = None
+
+        experiment_data_group.setObjectName("experiment_data_group")
+        experiment_layout.addWidget(experiment_data_group)
+
     def _ui_setup_s2_data(self):
         # Experiment Data group (S2 only)
         s2_data_group = QtWidgets.QGroupBox("Experiment Data")
@@ -368,9 +405,24 @@ class ArduinoControlApp(QtWidgets.QMainWindow):
         return s2_experiment_group
 
     def _ui_setup_s3_data(self):
+        s3_data_group, s3_data_layout, trial_info_layout = self._ui_setup_s3_basic_data()
+        corrective_loop_label = QtWidgets.QLabel("Corrective loop count:")
+        self.corrective_loop_value_label = QtWidgets.QLabel("0")
+        self.corrective_loop_value_label.setTextInteractionFlags(QtCore.Qt.TextSelectableByMouse)
+        trial_info_layout.addWidget(corrective_loop_label)
+        trial_info_layout.addWidget(self.corrective_loop_value_label)
+        s3_data_layout.addLayout(trial_info_layout)
+        return s3_data_group
+
+    def _ui_setup_s3_1_data(self):
+        s3_data_group, s3_data_layout, trial_info_layout = self._ui_setup_s3_basic_data()
+        s3_data_layout.addLayout(trial_info_layout)
+        return s3_data_group
+
+    def _ui_setup_s3_basic_data(self) -> tuple[QHBoxLayout, QVBoxLayout, QGroupBox]:
         """
-        Creates and returns a QWidget for S3 experiment data, showing left and right performance fields.
-        """
+            Creates and returns a QWidget for S3 experiment data, showing left and right performance fields.
+            """
         s3_data_group = QtWidgets.QGroupBox("Experiment Data")
         s3_data_layout = QtWidgets.QVBoxLayout(s3_data_group)
 
@@ -406,13 +458,7 @@ class ArduinoControlApp(QtWidgets.QMainWindow):
         self.correct_count_value_label.setTextInteractionFlags(QtCore.Qt.TextSelectableByMouse)
         trial_info_layout.addWidget(correct_count_label)
         trial_info_layout.addWidget(self.correct_count_value_label)
-        corrective_loop_label = QtWidgets.QLabel("Corrective loop count:")
-        self.corrective_loop_value_label = QtWidgets.QLabel("0")
-        self.corrective_loop_value_label.setTextInteractionFlags(QtCore.Qt.TextSelectableByMouse)
-        trial_info_layout.addWidget(corrective_loop_label)
-        trial_info_layout.addWidget(self.corrective_loop_value_label)
-        s3_data_layout.addLayout(trial_info_layout)
-        return s3_data_group
+        return s3_data_group, s3_data_layout, trial_info_layout
 
     def __setup_actuators(self, main_layout):
         actuators_group = QtWidgets.QGroupBox("Actuators")
@@ -564,12 +610,33 @@ class ArduinoControlApp(QtWidgets.QMainWindow):
             case 'S3':
                 self.append_log(
                     f"Stage {self.experiment_manager.config.s_level} Complete. "
-                    "Stage S3 complete. Moving to Stage S4.",
+                    "Stage S3 complete. Moving to Stage S3.1.",
                     logging.INFO
                 )
                 s3_folder = self.experiment_manager.experiment_folder
-                s4_manager = BeatBoxExperimentManagerS4(
+                s3_1_manager = BeatBoxExperimentManagerS3_1(
                     s3_folder,
+                    self.communicator,
+                    main_window=self,
+                    subject_info=self.subject_info
+                )
+                self.experiment_manager.deleteLater()
+                self.experiment_manager = s3_1_manager
+                self._ui_update_s2_to_s3_1()
+                self._ui_update_base_experiment_params()
+                self.connect_signal_from_experiment_manager()
+                self.experiment_manager.link_widgets()
+                self.experiment_manager.start_experiment()
+                self._reset_performance_gui()
+            case 'S3.1':
+                self.append_log(
+                    f"Stage {self.experiment_manager.config.s_level} Complete. "
+                    "Stage S3.1 complete. Moving to Stage S4.",
+                    logging.INFO
+                )
+                s3_1_folder = self.experiment_manager.experiment_folder
+                s4_manager = BeatBoxExperimentManagerS4(
+                    s3_1_folder,
                     self.communicator,
                     main_window=self,
                     subject_info=self.subject_info
@@ -770,7 +837,8 @@ class ArduinoControlApp(QtWidgets.QMainWindow):
                 self.right_value_label.setText(f"{right:.2f}" if right is not None else "-")
 
     def _update_corrective_loop(self, corrective_count: int):
-        self.corrective_loop_value_label.setText(str(corrective_count))
+        if getattr(self, 'corrective_loop_value_label', None) is not None:
+            self.corrective_loop_value_label.setText(str(corrective_count))
 
     # FIXME:SOLID: tightly coupled to experiment manager, does not use the signal slot pattern efficiently
     def _update_trial_numbers(self, correct_count: int, total_trials: int):
@@ -803,7 +871,8 @@ class ArduinoControlApp(QtWidgets.QMainWindow):
                 self.right_value_label.setText(f"{0:.2f}")
         self.total_trials_value_label.setText("0")
         self.correct_count_value_label.setText("0")
-        self.corrective_loop_value_label.setText("0")
+        if getattr(self, 'corrective_loop_value_label', None) is not None:
+            self.corrective_loop_value_label.setText("0")
         # If there are other fields to reset, add them here
         if getattr(self, 'valid_correct_value_label', None) is not None:
             self.valid_correct_value_label.setText("0")
@@ -870,7 +939,7 @@ class StageSelectDialog(QtWidgets.QDialog):
         layout = QtWidgets.QVBoxLayout(self)
         self.combo = QtWidgets.QComboBox()
         # FIXME:SOLID: Hardcoded stage names. Consider using an enum or abstraction for stages (OCP).
-        self.combo.addItems(["All", "S1", "S2", "S3", "S4"]) # FIXME: maybe use enum for stages instead
+        self.combo.addItems(["All", "S1", "S2", "S3", "S3.1", "S4"]) # FIXME: maybe use enum for stages instead
         layout.addWidget(QtWidgets.QLabel("Choose experiment stage:"))
         layout.addWidget(self.combo)
         # Animal info fields
