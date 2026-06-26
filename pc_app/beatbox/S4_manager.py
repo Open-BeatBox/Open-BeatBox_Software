@@ -1,4 +1,5 @@
 import logging
+from collections import deque
 from pathlib import Path
 from typing import List
 
@@ -42,7 +43,9 @@ class BeatBoxExperimentManagerS4(BeatBoxExperimentManagerS3):
         self.config = S4Config(Path(__file__).parent)
         self.config.s_level = 'S4'  # For experiment.cfg section, but config spec is S4
         self.config.load()
-
+        n_trials = int(self.config.n_trials)
+        self.left_responses = deque(maxlen=n_trials)
+        self.right_responses = deque(maxlen=n_trials)
         self.stage_status = None
 
         self._reward_left = 0

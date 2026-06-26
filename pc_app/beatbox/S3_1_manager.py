@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from collections import deque
 from pathlib import Path
 
 from beatbox.S2_manager import S2Config
@@ -22,6 +23,9 @@ class BeatBoxExperimentManagerS3_1(BeatBoxExperimentManagerS3):
         self.config = S2Config(Path(__file__).parent)
         self.config.s_level = 'S3.1'
         self.config.load()
+        n_trials = int(self.config.n_trials)
+        self.left_responses = deque(maxlen=n_trials)  # values: 'valid', 'invalid', 'incorrect'
+        self.right_responses = deque(maxlen=n_trials)
 
     def _stop_flash(self):
         self.set_outputs(off=get_pin_names_from_pattern(PATTERN_ID.FULL_WHITE, 'both'),

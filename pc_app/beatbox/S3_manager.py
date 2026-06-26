@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from collections import deque
 from pathlib import Path
 from qtpy import QtCore
 import logging
@@ -24,7 +25,9 @@ class BeatBoxExperimentManagerS3(BeatBoxExperimentManagerS2):
         self.config = S2Config(Path(__file__).parent)
         self.config.s_level = 'S3'  # For experiment.cfg section, but config spec is still S2
         self.config.load()
-        # Any S3-specific initialization can go here
+        n_trials = int(self.config.n_trials)
+        self.left_responses = deque(maxlen=n_trials)  # values: 'valid', 'invalid', 'incorrect'
+        self.right_responses = deque(maxlen=n_trials)
 
     def get_experiment_status(self):
         left_performance = self.get_left_performance()
