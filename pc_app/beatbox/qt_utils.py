@@ -222,10 +222,15 @@ def add_labeled_fields(layout: QBoxLayout, owner: object, specs: list[FieldSpec]
         setattr(owner, attr, val)
         layout.addWidget(lbl)
         layout.addWidget(val)
+    return specs
 
 
 def add_form_fields(layout: QFormLayout, owner: object, specs: list[FieldSpec]) -> None:
-    """Batch-create read-only fields into a ``QFormLayout``."""
+    """Batch-create read-only fields into a ``QFormLayout``.
+
+    Companion to :func:`add_labeled_fields` for form layouts where
+    ``addRow`` handles the caption/widget pairing.
+    """
     for spec in specs:
         attr = spec.attr or _derive_attr(spec.label)
         val = selectable_label(spec.initial)
