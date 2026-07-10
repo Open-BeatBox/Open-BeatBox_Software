@@ -16,9 +16,17 @@ import warnings
 from pathlib import Path
 import logging
 
-from PyQt5.QtWidgets import QPushButton, QGroupBox, QHBoxLayout, QVBoxLayout
 from configobj import ConfigObj
-from qtpy import QtWidgets, QtCore, QtGui
+
+from qtpy import QtCore
+from qtpy.QtCore import Qt
+from qtpy.QtGui import QColor, QPixmap
+from qtpy.QtWidgets import (
+    QLabel, QMainWindow, QTextEdit, QComboBox, QPushButton, QSlider,
+    QVBoxLayout, QWidget, QGroupBox, QHBoxLayout, QGridLayout, QFormLayout,
+    QFileDialog, QMessageBox, QProgressDialog, QButtonGroup, QErrorMessage,
+    QDialog, QLineEdit, QApplication
+)
 import qdarkstyle
 
 from beatbox.bb_logging import qt_handler, logger
@@ -29,7 +37,9 @@ from beatbox.S3_manager import BeatBoxExperimentManagerS3
 from beatbox.S3_1_manager import BeatBoxExperimentManagerS3_1
 from beatbox.S4_manager import BeatBoxExperimentManagerS4
 
-from beatbox.qt_utils import LEDIndicator
+from beatbox.qt_utils import (LEDIndicator, labeled_spinbox, labeled_double_spinbox, add_labeled_fields,
+                              FieldSpec, color_swatch, push_button, check_box, swap_button, combo_box, selectable_label,
+                              safe_delete, add_form_fields)
 from beatbox.serial_com import get_platform_serial_ports, BeatBoxCommunicator, BeatBoxMessage, HandshakeWorker
 
 
@@ -37,14 +47,48 @@ SERIAL_TIMEOUT = 2
 
 BAUD_RATE = 115200
 
-# FIXME:SOLID: This class violates SRP by handling UI, experiment logic, and hardware communication. Should be split into smaller classes.
-class ArduinoControlApp(QtWidgets.QMainWindow):
+_STAGE_MANAGER_CLASSES: dict[str, type] = {
+    'S1': BeatBoxExperimentManagerS1,
+    'S2': BeatBoxExperimentManagerS2,
+    'S3': BeatBoxExperimentManagerS3,
+    'S3.1': BeatBoxExperimentManagerS3_1,
+    'S4': BeatBoxExperimentManagerS4,
+}
+
+
+class StageTransition:
+    """All information needed to move from one stage to the next.
+
+    ``manager_cls`` is derived from ``next_label`` via ``_STAGE_MANAGER_CLASSES``
+    so the two dicts cannot drift out of sync.
+    ``next_label=None`` signals the terminal stage.
+    """
+
+    def __init__(self, next_label: str | None, ui_updater: str | None):
+        self.next_label = next_label
+        self.ui_updater = ui_updater
+
+    @property
+    def manager_cls(self) -> type | None:
+        return _STAGE_MANAGER_CLASSES.get(self.next_label)  # None if last
+
+
+_STAGE_TRANSITIONS: dict[str, StageTransition] = {
+    'S1': StageTransition('S2', '_ui_update_s1_to_s2'),
+    'S2': StageTransition('S3', '_ui_update_s2_to_s3'),
+    'S3': StageTransition('S3.1', '_ui_update_s2_to_s3_1'),
+    'S3.1': StageTransition('S4', '_ui_update_s2_to_s3'),  # FIXME: check updater
+    'S4': StageTransition(None, None),
+}
+
+
+class ArduinoControlApp(QMainWindow):
     def __init__(self, pins_config_file, experiment_folder='', with_neopixels=False, n_trials=20,
                  inter_trial_interval=10000, stage='S1', transition=False, subject_info=None):
         super().__init__()
 
         # First instantiate QtObjects needed by communicator
-        self.log_text = QtWidgets.QTextEdit('Log:')
+        self.log_text = QTextEdit('Log:')
 
         # Instantiate communicator and connect signals.
         self.communicator = BeatBoxCommunicator(baud_rate=BAUD_RATE, serial_timeout=SERIAL_TIMEOUT)
@@ -53,27 +97,22 @@ class ArduinoControlApp(QtWidgets.QMainWindow):
         self.communicator.errorOccurred.connect(self.on_error)
 
         self.with_neopixels = with_neopixels
-        manager_classes = {
-            'S1': BeatBoxExperimentManagerS1,
-            'S2': BeatBoxExperimentManagerS2,
-            'S3': BeatBoxExperimentManagerS3,
-            'S3.1': BeatBoxExperimentManagerS3_1,
-            'S4': BeatBoxExperimentManagerS4
-        }
+
         # FIXME:SOLID: This stage selection logic violates OCP. Adding new stages requires modifying this code.
-        if stage in manager_classes:
-            self.experiment_manager = manager_classes[stage](experiment_folder, self.communicator, main_window=self, subject_info=subject_info)
+        if stage in _STAGE_MANAGER_CLASSES:
+            self.experiment_manager = _STAGE_MANAGER_CLASSES[stage](experiment_folder, self.communicator,
+                                                                    main_window=self, subject_info=subject_info)
         else:
-            raise ValueError(f"Unknown stage: {stage}")
+            raise ValueError(f'Unknown stage: {stage}')
         self.subject_info = subject_info # store for later stages
         self.connect_signal_from_experiment_manager()
         self.enable_transitions = transition
 
         # UI Elements
-        self.port_combobox = QtWidgets.QComboBox(self)
+        self.port_combobox = QComboBox(self)
         self.port_combobox.setMinimumWidth(100)
-        self.connect_button = QtWidgets.QPushButton('Connect')
-        self.send_button = QtWidgets.QPushButton('Send Set Command')
+        self.connect_button = QPushButton('Connect')
+        self.send_button = QPushButton('Send Set Command')
         self.log_text.setReadOnly(True)
         self.actuators_controls = {}
         self.actuators_indicators = {}
@@ -83,11 +122,9 @@ class ArduinoControlApp(QtWidgets.QMainWindow):
 
         # Optional neopixel UI elements
         if self.with_neopixels:
-            self.colors = {'red': QtGui.QColor(255,0,0),
-                           'green': QtGui.QColor(0,255,0),
-                           'blue': QtGui.QColor(0,0,255)}
-            self.sliders = {col: QtWidgets.QSlider(QtCore.Qt.Horizontal) for col in self.colors.keys()}
-            self.color_preview = QtWidgets.QLabel()
+            self.colors = {'red': QColor(255,0,0), 'green': QColor(0,255,0), 'blue': QColor(0,0,255)}
+            self.sliders = {col: QSlider(Qt.Horizontal) for col in self.colors.keys()}
+            self.color_preview = QLabel()
 
         self.setWindowTitle('Beatbox Controller')
         self.main_layout = self.setup_ui()
@@ -123,100 +160,96 @@ class ArduinoControlApp(QtWidgets.QMainWindow):
         self.experiment_manager.pelletDeliveryAlert.connect(self._handle_pellet_delivery_alert)
 
     def setup_ui(self):
-        """ Set up the main UI layout and widgets. """
-        central_widget = QtWidgets.QWidget()
+        """Set up the main UI layout and widgets."""
+        central_widget = QWidget()
         self.setCentralWidget(central_widget)
-        main_layout = QtWidgets.QVBoxLayout(central_widget)
+        main_layout = QVBoxLayout(central_widget)
 
         # Serial connection controls
-        connection_group = QtWidgets.QGroupBox("Serial Connection")
-        connection_layout = QtWidgets.QHBoxLayout(connection_group)
+        connection_group = QGroupBox('Serial Connection')
+        connection_layout = QHBoxLayout(connection_group)
         self.refresh_ports()
         self.connect_button.clicked.connect(self.connect_serial)
-        connection_layout.addWidget(QtWidgets.QLabel("Port:"))
+        self.refresh_ports_btn = push_button('Refresh', on_clicked=self.refresh_ports)
+        connection_layout.addWidget(QLabel('Port:'))
         connection_layout.addWidget(self.port_combobox)
-        self.refresh_ports_btn = QPushButton('Refresh')
-        self.refresh_ports_btn.clicked.connect(self.refresh_ports)
         connection_layout.addWidget(self.refresh_ports_btn)
         connection_layout.addWidget(self.connect_button)
         main_layout.addWidget(connection_group)
 
         ##########################   Experiment   #########################
 
-        experiment_group = QtWidgets.QGroupBox("Experiment Setup")
-        experiment_group.setObjectName("experiment_group")
-        experiment_layout = QtWidgets.QVBoxLayout(experiment_group)
+        experiment_group = QGroupBox('Experiment Setup')
+        experiment_group.setObjectName('experiment_group')
+        experiment_layout = QVBoxLayout(experiment_group)
 
         ######### Overall experiment widgets
         # Experiment folder selection
-        overall_group = QtWidgets.QGroupBox("Overall setup")
-        overall_experiment_layout = QtWidgets.QHBoxLayout(overall_group)
-        self.experiment_button = QtWidgets.QPushButton("Select Folder")
-        self.experiment_button.clicked.connect(self.select_experiment_folder)
+        overall_group = QGroupBox('Overall setup')
+        overall_experiment_layout = QHBoxLayout(overall_group)
+        self.experiment_button = push_button('Select Folder', on_clicked=self.select_experiment_folder)
         overall_experiment_layout.addWidget(self.experiment_button)
 
         # Controls for n_trials and inter_trial_interval
-        self.n_trials_spinbox = QtWidgets.QSpinBox()
-        self.n_trials_spinbox.setRange(1, 9999)
-        self.n_trials_spinbox.setValue(self.experiment_manager.config.n_trials)
-        overall_experiment_layout.addWidget(QtWidgets.QLabel("n_trials:"))
+        lbl, self.n_trials_spinbox = labeled_spinbox('n_trials:', lo=1, hi=9999,
+                                                     value=self.experiment_manager.n_trials)
+        overall_experiment_layout.addWidget(lbl)
         overall_experiment_layout.addWidget(self.n_trials_spinbox)
 
-        self.inter_trial_spinbox = QtWidgets.QSpinBox()
-        self.inter_trial_spinbox.setRange(1, 999999)
-        self.inter_trial_spinbox.setValue(self.experiment_manager.config.inter_trial_interval)
-        overall_experiment_layout.addWidget(QtWidgets.QLabel("Inter trial (ms):"))
+        lbl, self.inter_trial_spinbox = labeled_spinbox('Inter trial (ms):', lo=1, hi=999_999,
+                                                        value=self.experiment_manager.inter_trial_interval)
+        overall_experiment_layout.addWidget(lbl)
         overall_experiment_layout.addWidget(self.inter_trial_spinbox)
 
-        self.experiment_state_btn = QtWidgets.QPushButton("Start Experiment")
-        self.experiment_state_btn.setEnabled(False)
-        self.experiment_state_btn.clicked.connect(self.start_experiment)
+        self.experiment_state_btn = push_button('Start Experiment', on_clicked=self.start_experiment, enabled=False)
         overall_experiment_layout.addWidget(self.experiment_state_btn)
 
         experiment_layout.addWidget(overall_group)
 
         ###### Experiment specific widgets
-        if self.experiment_manager.stage_number == 1:
-            experiment_data_group = self._ui_setup_s1_data()
-        elif self.experiment_manager.stage_number == 2:
-            s2_experiment_group = self._ui_setup_s2_controller()
-            experiment_data_group = self._ui_setup_s2_data()
-            experiment_layout.addWidget(s2_experiment_group)
-        elif self.experiment_manager.stage_number in (3, 4):
-            s3_experiment_group = self._ui_setup_s2_controller()
-            experiment_data_group = self._ui_setup_s3_data()
-            experiment_layout.addWidget(s3_experiment_group)
-        elif self.experiment_manager.stage_number == 3.1:
-            s3_experiment_group = self._ui_setup_s2_controller()
-            experiment_data_group = self._ui_setup_s3_1_data()
-            experiment_layout.addWidget(s3_experiment_group)
+        match self.experiment_manager.stage_number:
+            case 1:
+                experiment_data_group = self._ui_setup_s1_data()
+            case 2:
+                experiment_layout.addWidget(self._ui_setup_s2_controller())
+                experiment_data_group = self._ui_setup_s2_data()
+            case 3 | 4:
+                experiment_layout.addWidget(self._ui_setup_s2_controller())
+                experiment_data_group = self._ui_setup_s3_data()
+            case 3.1:
+                experiment_layout.addWidget(self._ui_setup_s2_controller())
+                experiment_data_group = self._ui_setup_s3_1_data()
+            case _:
+                raise ValueError(f'No UI setup defined for stage "{self.experiment_manager.stage_number}"')
 
-        experiment_data_group.setObjectName("experiment_data_group")
+        experiment_data_group.setObjectName('experiment_data_group')
         experiment_layout.addWidget(experiment_data_group)
         main_layout.addWidget(experiment_group)
 
         ####################################################################
 
         # SENSORS
-        sensors_group = QtWidgets.QGroupBox('Sensors')
-        sensors_layout = QtWidgets.QGridLayout(sensors_group)
+        sensors_group = QGroupBox('Sensors')
+        sensors_layout = QGridLayout(sensors_group)
         for row, pin_name in enumerate(self.experiment_manager.sensors_pins_config.pin_names):
-            label = QtWidgets.QLabel(pin_name.replace("_", " ").title())
             led = LEDIndicator()
-            sensors_layout.addWidget(label, row, 0, alignment=QtCore.Qt.AlignVCenter)
-            sensors_layout.addWidget(led, row, 1, alignment=QtCore.Qt.AlignVCenter)
+            sensors_layout.addWidget(QLabel(pin_name.replace('_', ' ').title()),
+                                     row, 0, alignment=Qt.AlignVCenter)
+            sensors_layout.addWidget(led, row, 1, alignment=Qt.AlignVCenter)
             self.sensors_indicators[pin_name] = led
         main_layout.addWidget(sensors_group)
 
         # Blinking alert for pellet delivery (now after sensors, before actuators)
-        self.blinking_alert_label = QtWidgets.QLabel()
-        self.blinking_alert_label.setText("")
-        self.blinking_alert_label.setStyleSheet("color: red; font-weight: bold;")
-        self.blinking_alert_label.setAlignment(QtCore.Qt.AlignCenter)
+        self.blinking_alert_label = QLabel('')
+        self.blinking_alert_label.setStyleSheet('color: red; font-weight: bold;')
+        self.blinking_alert_label.setAlignment(Qt.AlignCenter)
         main_layout.addWidget(self.blinking_alert_label)
 
         # Actuators (move after alert)
         self.__setup_actuators(main_layout)
+
+        if self.with_neopixels:
+            self.setup_neopixels_ui(main_layout)
 
         # Send command button
         self.send_button.clicked.connect(self.send_set_command)
@@ -224,21 +257,19 @@ class ArduinoControlApp(QtWidgets.QMainWindow):
 
         # Logging area
         # Animal information and stage/phase info section
-        info_row_widget = QtWidgets.QWidget()
-        info_row_layout = QtWidgets.QHBoxLayout(info_row_widget)
+        info_row_widget = QWidget()
+        info_row_layout = QHBoxLayout(info_row_widget)
         info_row_layout.setContentsMargins(0, 0, 0, 0)
         # Left: Animal info
-        animal_info_group = self._create_animal_info_group()
-        info_row_layout.addWidget(animal_info_group)
+        info_row_layout.addWidget(self._create_animal_info_group())
+
         # Right: Stage and phase info
-        stage_phase_group = QtWidgets.QGroupBox("Stage/Phase Info")
-        stage_phase_layout = QtWidgets.QFormLayout(stage_phase_group)
-        self.stage_label = QtWidgets.QLabel(str(self.experiment_manager.config.s_level))
-        self.phase_label = QtWidgets.QLabel("")  # To be updated dynamically
-        self.stage_label.setTextInteractionFlags(QtCore.Qt.TextSelectableByMouse)
-        self.phase_label.setTextInteractionFlags(QtCore.Qt.TextSelectableByMouse)
-        stage_phase_layout.addRow("Current Stage:", self.stage_label)
-        stage_phase_layout.addRow("Current Phase:", self.phase_label)
+        stage_phase_group = QGroupBox('Stage/Phase Info')
+        stage_phase_layout = QFormLayout(stage_phase_group)
+        self.stage_label = selectable_label(str(self.experiment_manager.config.s_level))
+        self.phase_label = selectable_label()
+        stage_phase_layout.addRow('Current Stage:', self.stage_label)
+        stage_phase_layout.addRow('Current Phase:', self.phase_label)
         info_row_layout.addWidget(stage_phase_group)
         main_layout.addWidget(info_row_widget)
 
@@ -246,12 +277,8 @@ class ArduinoControlApp(QtWidgets.QMainWindow):
 
         return main_layout
 
-    def _ui_update_s1_to_s2(self):
-        """
-        Remove S1-specific widgets and add S2-specific widgets and data group.
-        """
-        # Find experiment_group
-        experiment_group = self.findChild(QtWidgets.QGroupBox, "experiment_group")
+    def _swap_experiment_data_group(self, new_data_group: QWidget, controller: QWidget | None = None):
+        experiment_group = self.findChild(QGroupBox, 'experiment_group')
         if not experiment_group:
             return
         experiment_layout = experiment_group.layout()
@@ -259,158 +286,93 @@ class ArduinoControlApp(QtWidgets.QMainWindow):
         for i in range(experiment_layout.count()):
             item = experiment_layout.itemAt(i)
             widget = item.widget()
-            if widget and widget.objectName() == "experiment_data_group":
+            if widget and widget.objectName() == 'experiment_data_group':
                 experiment_layout.removeWidget(widget)
-                widget.setParent(None)
+                safe_delete(widget)  # schedule C++ deletion, not just reparent
                 break
-        # Add S2-specific widgets
-        s2_experiment_group = self._ui_setup_s2_controller()
-        experiment_data_group = self._ui_setup_s2_data()
-        experiment_data_group.setObjectName("experiment_data_group")
-        experiment_layout.addWidget(s2_experiment_group)
-        experiment_layout.addWidget(experiment_data_group)
+
+        if controller is not None:
+            experiment_layout.addWidget(controller)
+        new_data_group.setObjectName('experiment_data_group')
+        experiment_layout.addWidget(new_data_group)
+
+    def _ui_update_s1_to_s2(self):
+        """
+        Remove S1-specific widgets and add S2-specific widgets and data group.
+        """
+        self._swap_experiment_data_group(self._ui_setup_s2_data(), self._ui_setup_s2_controller())
 
     def _ui_update_s2_to_s3(self):
         """
         Remove S2-specific widgets and add S3-specific widgets and data group.
         """
-        experiment_group = self.findChild(QtWidgets.QGroupBox, "experiment_group")
-        if not experiment_group:
-            return
-        experiment_layout = experiment_group.layout()
-        # Remove experiment_data_group if present
-        for i in range(experiment_layout.count()):
-            item = experiment_layout.itemAt(i)
-            widget = item.widget()
-            if widget and widget.objectName() == "experiment_data_group":
-                experiment_layout.removeWidget(widget)
-                widget.setParent(None)
-                break
-        # Add S3-specific widgets
-        experiment_data_group = self._ui_setup_s3_data()
-        experiment_data_group.setObjectName("experiment_data_group")
-        experiment_layout.addWidget(experiment_data_group)
+        self._swap_experiment_data_group(self._ui_setup_s3_data())
 
     def _ui_update_s2_to_s3_1(self):
+        self._swap_experiment_data_group(self._ui_setup_s3_1_data())
         # remove corrective loop count as it is irrelevant in s3.1
-        experiment_group = self.findChild(QtWidgets.QGroupBox, "experiment_group")
-        if not experiment_group:
-            return
-        experiment_layout = experiment_group.layout()
-
-        # Remove current experiment data group first.
-        for i in range(experiment_layout.count()):
-            item = experiment_layout.itemAt(i)
-            widget = item.widget()
-            if widget and widget.objectName() == "experiment_data_group":
-                experiment_layout.removeWidget(widget)
-                widget.setParent(None)
-                break
-
-        # Reuse S3 data layout then drop the corrective-loop widgets for S3.1.
-        experiment_data_group = self._ui_setup_s3_data()
-        data_layout = experiment_data_group.layout()
-        if data_layout and data_layout.count() > 1:
-            trial_info_layout = data_layout.itemAt(1).layout()
-            if trial_info_layout and trial_info_layout.count() >= 2:
-                for _ in range(2):
-                    item = trial_info_layout.takeAt(trial_info_layout.count() - 1)
-                    if item and item.widget():
-                        item.widget().deleteLater()
-        self.corrective_loop_value_label = None
-
-        experiment_data_group.setObjectName("experiment_data_group")
-        experiment_layout.addWidget(experiment_data_group)
+        self.corrective_loop_value_label = safe_delete(getattr(self, 'corrective_loop_value_label', None))
 
     def _ui_setup_s2_data(self):
-        # Experiment Data group (S2 only)
-        s2_data_group = QtWidgets.QGroupBox("Experiment Data")
-        s2_data_layout = QtWidgets.QVBoxLayout(s2_data_group)
+        """Creates and returns the S2 experiment data group."""
+        s2_data_group = QGroupBox('Experiment Data')
+        s2_data_layout = QVBoxLayout(s2_data_group)
 
-        # Performance row (S2: only overall)
-        performance_layout = QtWidgets.QHBoxLayout()
-        overall_label = QtWidgets.QLabel("Overall performance:")
-        self.overall_value_label = QtWidgets.QLabel(f"{0:.2f}")
-        self.overall_value_label.setTextInteractionFlags(QtCore.Qt.TextSelectableByMouse)
-        performance_layout.addWidget(overall_label)
-        performance_layout.addWidget(self.overall_value_label)
-        self.left_value_label = None
+        # Performance row (S2: overall only, no left/right split)
+        performance_layout = QHBoxLayout()
+        add_labeled_fields(performance_layout, self, [
+            FieldSpec('Overall performance:', 'overall_value_label', '0.00'),
+        ])
+        self.left_value_label = None   # not used in S2, guarded in update methods
         self.right_value_label = None
         s2_data_layout.addLayout(performance_layout)
 
         # Trial info row
-        trial_info_layout = QtWidgets.QHBoxLayout()
-        # Total trials
-        total_trials_label = QtWidgets.QLabel("Total trials:")
-        self.total_trials_value_label = QtWidgets.QLabel("0")
-        self.total_trials_value_label.setTextInteractionFlags(QtCore.Qt.TextSelectableByMouse)
-        trial_info_layout.addWidget(total_trials_label)
-        trial_info_layout.addWidget(self.total_trials_value_label)
-        # Valid & correct trials (against time pressure)
-        valid_correct_label = QtWidgets.QLabel("Valid & correct trials:")
-        self.valid_correct_value_label = QtWidgets.QLabel("0")
-        self.valid_correct_value_label.setTextInteractionFlags(QtCore.Qt.TextSelectableByMouse)
-        trial_info_layout.addWidget(valid_correct_label)
-        trial_info_layout.addWidget(self.valid_correct_value_label)
-        # Left screen touches
-        left_touches_label = QtWidgets.QLabel("Left touches:")
-        self.left_touches_value_label = QtWidgets.QLabel("0")
-        self.left_touches_value_label.setTextInteractionFlags(QtCore.Qt.TextSelectableByMouse)
-        trial_info_layout.addWidget(left_touches_label)
-        trial_info_layout.addWidget(self.left_touches_value_label)
-        # Right screen touches
-        right_touches_label = QtWidgets.QLabel("Right touches:")
-        self.right_touches_value_label = QtWidgets.QLabel("0")
-        self.right_touches_value_label.setTextInteractionFlags(QtCore.Qt.TextSelectableByMouse)
-        trial_info_layout.addWidget(right_touches_label)
-        trial_info_layout.addWidget(self.right_touches_value_label)
+        trial_info_layout = QHBoxLayout()
+
+        add_labeled_fields(trial_info_layout, self, [
+            FieldSpec('Total trials:', 'total_trials_value_label'),            # Total trials
+            FieldSpec('Valid & correct trials:', 'valid_correct_value_label'), # Valid & correct trials (against time pressure)
+            FieldSpec('Left touches:', 'left_touches_value_label'),            # Left screen touches
+            FieldSpec('Right touches:', 'right_touches_value_label'),          # Right screen touches
+        ])
+
         s2_data_layout.addLayout(trial_info_layout)
         return s2_data_group
 
     def _ui_setup_s1_data(self):
-        """
-        Creates and returns a QWidget for S1 experiment data, showing current trial number.
-        """
-        s1_data_group = QtWidgets.QGroupBox("Experiment Data")
-        s1_data_layout = QtWidgets.QVBoxLayout(s1_data_group)
-        trial_layout = QtWidgets.QHBoxLayout()
-        current_trial_label = QtWidgets.QLabel("Current trial:")
-        self.s1_current_trial_value_label = QtWidgets.QLabel("0")
-        trial_layout.addWidget(current_trial_label)
-        trial_layout.addWidget(self.s1_current_trial_value_label)
+        """Creates and returns a QWidget for S1 experiment data, showing current trial number."""
+        s1_data_group = QGroupBox('Experiment Data')
+        s1_data_layout = QVBoxLayout(s1_data_group)
+        trial_layout = QHBoxLayout()
+        add_labeled_fields(trial_layout, self, [
+            FieldSpec('Current trial:', 's1_current_trial_value_label'),
+        ])
         s1_data_layout.addLayout(trial_layout)
         return s1_data_group
 
     def _ui_setup_s2_controller(self):
-        s2_experiment_group = QtWidgets.QGroupBox("S2/S3 setup")
-        s2_layout = QtWidgets.QHBoxLayout(s2_experiment_group)
+        s2_experiment_group = QGroupBox('S2/S3 setup')
+        s2_layout = QHBoxLayout(s2_experiment_group)
 
         # Error flash duration
-        self.error_flash_spinbox = QtWidgets.QSpinBox()
-        self.error_flash_spinbox.setRange(1, 999999)
-        self.error_flash_spinbox.setValue(
-            self.experiment_manager.config.error_flash_ms)
-        s2_layout.addWidget(QtWidgets.QLabel("Blink duration (ms):"))
+        lbl, self.error_flash_spinbox = labeled_spinbox('Blink duration (ms):', lo=1, hi=999_999,
+                                                        value=self.experiment_manager.error_flash_ms)
+        s2_layout.addWidget(lbl)
         s2_layout.addWidget(self.error_flash_spinbox)
 
         # Learning threshold
-        self.learning_threshold_spinbox = QtWidgets.QDoubleSpinBox()
-        self.learning_threshold_spinbox.setRange(0, 1)
-        self.learning_threshold_spinbox.setSingleStep(0.01)
-        self.learning_threshold_spinbox.setDecimals(2)
-        self.learning_threshold_spinbox.setValue(
-            self.experiment_manager.config.learning_threshold)
-        s2_layout.addWidget(QtWidgets.QLabel("Learning threshold:"))
+        lbl, self.learning_threshold_spinbox = labeled_double_spinbox(
+            'Learning threshold:', value=self.experiment_manager.config.learning_threshold)
+        s2_layout.addWidget(lbl)
         s2_layout.addWidget(self.learning_threshold_spinbox)
         return s2_experiment_group
 
     def _ui_setup_s3_data(self):
         s3_data_group, s3_data_layout, trial_info_layout = self._ui_setup_s3_basic_data()
-        corrective_loop_label = QtWidgets.QLabel("Corrective loop count:")
-        self.corrective_loop_value_label = QtWidgets.QLabel("0")
-        self.corrective_loop_value_label.setTextInteractionFlags(QtCore.Qt.TextSelectableByMouse)
-        trial_info_layout.addWidget(corrective_loop_label)
-        trial_info_layout.addWidget(self.corrective_loop_value_label)
+        add_labeled_fields(trial_info_layout, self, [
+            FieldSpec('Corrective loop count:', 'corrective_loop_value_label'),
+        ])
         s3_data_layout.addLayout(trial_info_layout)
         return s3_data_group
 
@@ -419,118 +381,79 @@ class ArduinoControlApp(QtWidgets.QMainWindow):
         s3_data_layout.addLayout(trial_info_layout)
         return s3_data_group
 
-    def _ui_setup_s3_basic_data(self) -> tuple[QHBoxLayout, QVBoxLayout, QGroupBox]:
-        """
-            Creates and returns a QWidget for S3 experiment data, showing left and right performance fields.
-            """
-        s3_data_group = QtWidgets.QGroupBox("Experiment Data")
-        s3_data_layout = QtWidgets.QVBoxLayout(s3_data_group)
+    def _ui_setup_s3_basic_data(self) -> tuple[QGroupBox, QVBoxLayout, QHBoxLayout]:
+        """Creates the S3 base data group: left/right performance + trial info row."""
+        s3_data_group = QGroupBox('Experiment Data')
+        s3_data_layout = QVBoxLayout(s3_data_group)
 
         # Performance row
-        performance_layout = QtWidgets.QHBoxLayout()
-        left_label = QtWidgets.QLabel("Left performance:")
-        self.left_value_label = QtWidgets.QLabel(f"{0:.2f}")
-        self.left_value_label.setTextInteractionFlags(QtCore.Qt.TextSelectableByMouse)
-        performance_layout.addWidget(left_label)
-        performance_layout.addWidget(self.left_value_label)
-        right_label = QtWidgets.QLabel("Right performance:")
-        self.right_value_label = QtWidgets.QLabel(f"{0:.2f}")
-        self.right_value_label.setTextInteractionFlags(QtCore.Qt.TextSelectableByMouse)
-        performance_layout.addWidget(right_label)
-        performance_layout.addWidget(self.right_value_label)
+        performance_layout = QHBoxLayout()
+        add_labeled_fields(performance_layout, self, [
+            FieldSpec('Left performance:', 'left_value_label', '0.00'),
+            FieldSpec('Right performance:', 'right_value_label', '0.00'),
+        ])
         self.overall_value_label = None
         s3_data_layout.addLayout(performance_layout)
 
-        # Trial info row
-        trial_info_layout = QtWidgets.QHBoxLayout()
-        total_trials_label = QtWidgets.QLabel("Total trials:")
-        self.total_trials_value_label = QtWidgets.QLabel("0")
-        self.total_trials_value_label.setTextInteractionFlags(QtCore.Qt.TextSelectableByMouse)
-        trial_info_layout.addWidget(total_trials_label)
-        trial_info_layout.addWidget(self.total_trials_value_label)
-        valid_correct_label = QtWidgets.QLabel("Valid & correct trials:")
-        self.valid_correct_value_label = QtWidgets.QLabel("0")
-        self.valid_correct_value_label.setTextInteractionFlags(QtCore.Qt.TextSelectableByMouse)
-        trial_info_layout.addWidget(valid_correct_label)
-        trial_info_layout.addWidget(self.valid_correct_value_label)
-        correct_count_label = QtWidgets.QLabel("Correct responses count:")
-        self.correct_count_value_label = QtWidgets.QLabel("0")
-        self.correct_count_value_label.setTextInteractionFlags(QtCore.Qt.TextSelectableByMouse)
-        trial_info_layout.addWidget(correct_count_label)
-        trial_info_layout.addWidget(self.correct_count_value_label)
+        # Trial info row (returned so callers can append more fields before adding to layout)
+        trial_info_layout = QHBoxLayout()
+        add_labeled_fields(trial_info_layout, self, [
+            FieldSpec('Total trials:', 'total_trials_value_label'),
+            FieldSpec('Valid & correct trials:', 'valid_correct_value_label'),
+            FieldSpec('Correct responses count:', 'correct_count_value_label'),
+        ])
+
         return s3_data_group, s3_data_layout, trial_info_layout
 
     def __setup_actuators(self, main_layout):
-        actuators_group = QtWidgets.QGroupBox("Actuators")
-        actuators_layout = QtWidgets.QVBoxLayout(actuators_group)
+        actuators_group = QGroupBox('Actuators')
+        actuators_layout = QVBoxLayout(actuators_group)
 
-        # General controls
-        general_layout = QtWidgets.QGridLayout()
-        row = 0
-        for pin_name in self.experiment_manager.actuator_pins_cfg.pin_names:
-            if not pin_name.startswith("left_") and not pin_name.startswith("right_"):
-                self.__set_actuator_pin(general_layout, pin_name, row)
-                row += 1
+        # General controls (neither left_ nor right_)
+        general_layout = QGridLayout()
+        for row, pin_name in enumerate(p for p in self.experiment_manager.actuator_pins_cfg.pin_names
+                                       if not p.startswith(('left_', 'right_'))):
+            self.__set_actuator_pin(general_layout, pin_name, row)
         actuators_layout.addLayout(general_layout)
 
-        # Left display
-        left_group = QtWidgets.QGroupBox("Left Display")
-        left_layout = QtWidgets.QGridLayout(left_group)
-        self.left_button_group = QtWidgets.QButtonGroup()
-        row = 0
-        for pin_name in self.experiment_manager.actuator_pins_cfg.pin_names:
-            if pin_name.startswith("left_"):
-                self.__set_actuator_pin(left_layout, pin_name, row)
-                row += 1
-
-        # Right display
-        right_group = QtWidgets.QGroupBox("Right Display")
-        right_layout = QtWidgets.QGridLayout(right_group)
-        self.right_button_group = QtWidgets.QButtonGroup()
-        row = 0
-        for pin_name in self.experiment_manager.actuator_pins_cfg.pin_names:
-            if pin_name.startswith("right_"):
-                self.__set_actuator_pin(right_layout, pin_name, row)
-                row += 1
-
-        # Place left and right side by side
-        lr_layout = QtWidgets.QHBoxLayout()
-        lr_layout.addWidget(left_group)
-        lr_layout.addWidget(right_group)
+        # Left and right displays side by side
+        lr_layout = QHBoxLayout()
+        for side in ('left', 'right'):
+            lr_layout.addWidget(self.__setup_side_display(side))
         actuators_layout.addLayout(lr_layout)
 
         main_layout.addWidget(actuators_group)
 
-    def __set_actuator_pin(self, layout, pin_name, row):
-        title = pin_name.replace("_", " ").replace("left ", "").replace("right ", "").title()
+    def __setup_side_display(self, side: str) -> QGroupBox:
+        """Build one side's display group ('left' or 'right') and return it."""
+        group = QGroupBox(f'{side.title()} Display')
+        layout = QGridLayout(group)
+        setattr(self, f'{side}_button_group', QButtonGroup())
+        for row, pin_name in enumerate(p for p in self.experiment_manager.actuator_pins_cfg.pin_names
+                                       if p.startswith(f'{side}_')):
+            self.__set_actuator_pin(layout, pin_name, row)
+        return group
 
-        if pin_name.startswith("left_"):
-            widget = QtWidgets.QCheckBox(title)
-            widget.stateChanged.connect(self.send_set_command)
-            self.left_buttons.append(widget)  # TODO: maybe dictionary with pattern number
-        elif pin_name.startswith("right_"):
-            widget = QtWidgets.QCheckBox(title)
-            widget.stateChanged.connect(self.send_set_command)
-            self.right_buttons.append(widget)
+    def __set_actuator_pin(self, layout, pin_name, row):
+        title = pin_name.replace('_', ' ').replace('left ', '').replace('right ', '').title()
+
+        if pin_name.startswith(('left_', 'right_')):
+            widget = check_box(title, on_changed=self.send_set_command)
+            side_list = self.left_buttons if pin_name.startswith('left_') else self.right_buttons
+            side_list.append(widget)
+        elif pin_name == 'reward':
+            widget = push_button(title, on_clicked=self.send_set_command, checkable=True)
         else:
-            if pin_name == 'reward':
-                widget = QtWidgets.QPushButton(title)
-                widget.setCheckable(True)
-                widget.clicked.connect(self.send_set_command)
-            else:
-                widget= QtWidgets.QCheckBox(title)
-                widget.stateChanged.connect(self.send_set_command)
+            widget = check_box(title, on_changed=self.send_set_command)
 
         led = LEDIndicator()
-        # layout.addWidget(label, row, 0, alignment=QtCore.Qt.AlignVCenter)
-        layout.addWidget(widget, row, 0, alignment=QtCore.Qt.AlignVCenter)
-        layout.addWidget(led, row, 1, alignment=QtCore.Qt.AlignVCenter)
+        layout.addWidget(widget, row, 0, alignment=Qt.AlignVCenter)
+        layout.addWidget(led, row, 1, alignment=Qt.AlignVCenter)
         self.actuators_controls[pin_name] = widget
         self.actuators_indicators[pin_name] = led
-        row += 1
 
     def select_experiment_folder(self):
-        folder = QtWidgets.QFileDialog.getExistingDirectory(self, "Select Experiment Folder")
+        folder = QFileDialog.getExistingDirectory(self, 'Select Experiment Folder')
         if folder:
             self.experiment_manager.set_experiment_folder(folder)
             self._folder_selected = True
@@ -549,134 +472,59 @@ class ArduinoControlApp(QtWidgets.QMainWindow):
 
     def start_experiment(self):
         self.experiment_manager.start_experiment()
-        self.experiment_state_btn.setText("Stop Experiment")
-        self.experiment_state_btn.clicked.disconnect(self.start_experiment)
-        self.experiment_state_btn.clicked.connect(self.stop_experiment)
+        swap_button(self.experiment_state_btn, 'Stop Experiment', self.start_experiment, self.stop_experiment)
 
     def stop_experiment(self):
         self.experiment_manager.end_experiment()
-        self.experiment_state_btn.setText("Start Experiment")
-        self.experiment_state_btn.clicked.disconnect(self.stop_experiment)
-        self.experiment_state_btn.clicked.connect(self.start_experiment)
+        swap_button(self.experiment_state_btn, 'Start Experiment', self.stop_experiment, self.start_experiment)
         self.experiment_state_btn.setEnabled(self._serial_connected and self._folder_selected)
-        logger.debug("Stopping experiment.")
+        logger.debug('Stopping experiment.')
 
-    def handle_stage_end(self, reason: str):
+    def handle_stage_end(self, current_stage: str):
         # FIXME:SOLID: This method handles experiment logic and UI transitions, violating SRP. Should delegate to separate controller/manager.
         if not self.enable_transitions:
             return
-        match reason:
-            case 'S1':
-                self.append_log(
-                    f"Stage {self.experiment_manager.config.s_level} Complete. "
-                    "Stage S1 complete. Moving to Stage S2.",
-                    logging.INFO
-                )
-                s1_folder = self.experiment_manager.experiment_folder
-                s2_manager = BeatBoxExperimentManagerS2(
-                    s1_folder,
-                    self.communicator,
-                    main_window=self,
-                    subject_info=self.subject_info
-                )
-                self.experiment_manager.deleteLater()
-                self.experiment_manager = s2_manager
-                self._ui_update_s1_to_s2()
-                self._ui_update_base_experiment_params()
-                self.connect_signal_from_experiment_manager()
-                self.experiment_manager.link_widgets()
-                self.experiment_manager.start_experiment()
-            case 'S2':
-                self.append_log(
-                    f"Stage {self.experiment_manager.config.s_level} Complete. "
-                    "Stage S2 complete. Moving to Stage S3.",
-                    logging.INFO
-                )
-                s2_folder = self.experiment_manager.experiment_folder
-                s3_manager = BeatBoxExperimentManagerS3(
-                    s2_folder,
-                    self.communicator,
-                    main_window=self,
-                    subject_info=self.subject_info
-                )
-                self.experiment_manager.deleteLater()
-                self.experiment_manager = s3_manager
-                self._ui_update_s2_to_s3()
-                self._ui_update_base_experiment_params()
-                self.connect_signal_from_experiment_manager()
-                self.experiment_manager.link_widgets()
-                self.experiment_manager.start_experiment()
-                self._reset_performance_gui()
-            case 'S3':
-                self.append_log(
-                    f"Stage {self.experiment_manager.config.s_level} Complete. "
-                    "Stage S3 complete. Moving to Stage S3.1.",
-                    logging.INFO
-                )
-                s3_folder = self.experiment_manager.experiment_folder
-                s3_1_manager = BeatBoxExperimentManagerS3_1(
-                    s3_folder,
-                    self.communicator,
-                    main_window=self,
-                    subject_info=self.subject_info
-                )
-                self.experiment_manager.deleteLater()
-                self.experiment_manager = s3_1_manager
-                self._ui_update_s2_to_s3_1()
-                self._ui_update_base_experiment_params()
-                self.connect_signal_from_experiment_manager()
-                self.experiment_manager.link_widgets()
-                self.experiment_manager.start_experiment()
-                self._reset_performance_gui()
-            case 'S3.1':
-                self.append_log(
-                    f"Stage {self.experiment_manager.config.s_level} Complete. "
-                    "Stage S3.1 complete. Moving to Stage S4.",
-                    logging.INFO
-                )
-                s3_1_folder = self.experiment_manager.experiment_folder
-                s4_manager = BeatBoxExperimentManagerS4(
-                    s3_1_folder,
-                    self.communicator,
-                    main_window=self,
-                    subject_info=self.subject_info
-                )
-                self.experiment_manager.deleteLater()
-                self.experiment_manager = s4_manager
-                self._ui_update_s2_to_s3()  # FIXME: S4 uses S3 widgets for now
-                self._ui_update_base_experiment_params()
-                self.connect_signal_from_experiment_manager()
-                self.experiment_manager.link_widgets()
-                self.experiment_manager.start_experiment()
-                self._reset_performance_gui()
-            case _:
-                QtWidgets.QMessageBox.information(
-                    self, f"Stage {self.experiment_manager.config.s_level} Complete",
-                    "Experiment complete.")
+
+        transition = _STAGE_TRANSITIONS.get(current_stage)
+        if transition is None:
+            raise ValueError(f'Unknown stage "{current_stage}"')
+
+        if transition.manager_cls is None:  # terminal stage — nothing follows S4
+            QMessageBox.information(self, f'Stage {current_stage} complete', 'Experiment complete.')
+            return
+
+        self.append_log(
+            f'Stage {current_stage} complete. Moving to Stage "{transition.next_label}".', logging.INFO)
+
+        manager = transition.manager_cls(self.experiment_manager.experiment_folder, self.communicator,
+                                         main_window=self, subject_info=self.subject_info)
+        self.experiment_manager.deleteLater()
+        self.experiment_manager = manager
+
+        if transition.ui_updater is not None:
+            getattr(self, transition.ui_updater)()
+
+        self._ui_update_base_experiment_params()
+        self.connect_signal_from_experiment_manager()
+        self.experiment_manager.link_widgets()
+        self.experiment_manager.start_experiment()
+        if current_stage != 'S1':
+            self._reset_performance_gui()
 
     def setup_neopixels_ui(self, main_layout):
-        neopixel_group = QtWidgets.QGroupBox("Neopixel Control")
-        layout = QtWidgets.QVBoxLayout(neopixel_group)
-        grid = QtWidgets.QGridLayout()
-
-        def create_label(color: QtGui.QColor):
-            lbl = QtWidgets.QLabel()
-            lbl.setFixedSize(20,20)
-            pixmap = QtGui.QPixmap(20,20)
-            pixmap.fill(color)
-            lbl.setPixmap(pixmap)
-            lbl.setAlignment(QtCore.Qt.AlignCenter)
-            return lbl
+        neopixel_group = QGroupBox('Neopixel Control')
+        layout = QVBoxLayout(neopixel_group)
+        grid = QGridLayout()
 
         for row, col in enumerate(self.colors.keys()):
-            grid.addWidget(QtWidgets.QLabel(f"{col.title()}:"), row, 0, alignment=QtCore.Qt.AlignVCenter)
-            grid.addWidget(create_label(QtGui.QColor(0,0,0)), row, 1, alignment=QtCore.Qt.AlignVCenter)
-            grid.addWidget(self.sliders[col], row, 2, alignment=QtCore.Qt.AlignVCenter)
-            grid.addWidget(create_label(self.colors[col]), row, 3, alignment=QtCore.Qt.AlignVCenter)
+            grid.addWidget(QLabel(f'{col.title()}:'), row, 0, alignment=Qt.AlignVCenter)
+            grid.addWidget(color_swatch(QColor(0,0,0)), row, 1, alignment=Qt.AlignVCenter)
+            grid.addWidget(self.sliders[col], row, 2, alignment=Qt.AlignVCenter)
+            grid.addWidget(color_swatch(self.colors[col]), row, 3, alignment=Qt.AlignVCenter)
 
         layout.addLayout(grid)
-        preview_layout = QtWidgets.QHBoxLayout()
-        preview_layout.addWidget(QtWidgets.QLabel("Preview:"))
+        preview_layout = QHBoxLayout()
+        preview_layout.addWidget(QLabel('Preview:'))
         self.color_preview.setFixedSize(50,50)
         preview_layout.addWidget(self.color_preview)
         layout.addLayout(preview_layout)
@@ -724,22 +572,18 @@ class ArduinoControlApp(QtWidgets.QMainWindow):
         self._connect_progress.close()
 
         if ok:            # connect btn stays disabled
-            QtWidgets.QMessageBox.information(self, "BeatBox", "Connection established!")
+            QMessageBox.information(self, 'BeatBox', 'Connection established!')
         else:
-            error_message = (f"Could not establish communication with port {self.port_combobox.currentText()}. "
-                             f"Please check the serial port and try again.")
-            QtWidgets.QMessageBox.critical(self, "BeatBox", error_message)
+            error_message = (f'Could not establish communication with port {self.port_combobox.currentText()}. '
+                             f'Please check the serial port and try again.')
+            QMessageBox.critical(self, 'BeatBox', error_message)
             self.connect_button.setEnabled(True)
 
     def __create_connection_p_bar(self):
-        dlg = QtWidgets.QProgressDialog(
-            "Connecting to BeatBox device…",
-            None,  # no Cancel button
-            0, 0,  # range 0-0 -> just spinning busy indicator
-            self
-        )
-        dlg.setWindowTitle("Connecting")
-        dlg.setWindowModality(QtCore.Qt.ApplicationModal)
+        dlg = QProgressDialog('Connecting to BeatBox device…', cancelButtonText=None,
+                              minimum=0, maximum=0, parent=self)
+        dlg.setWindowTitle('Connecting')
+        dlg.setWindowModality(Qt.ApplicationModal)
         dlg.setMinimumDuration(0)  # show immediately
         dlg.setAutoClose(False)
         return dlg
@@ -751,8 +595,8 @@ class ArduinoControlApp(QtWidgets.QMainWindow):
             return None
 
     def update_color_preview(self):
-        pixmap = QtGui.QPixmap(self.color_preview.size())
-        pixmap.fill(QtGui.QColor(*self.get_rgb_values()))
+        pixmap = QPixmap(self.color_preview.size())
+        pixmap.fill(QColor(*self.get_rgb_values()))
         self.color_preview.setPixmap(pixmap)
 
     def on_connected(self):
@@ -827,14 +671,14 @@ class ArduinoControlApp(QtWidgets.QMainWindow):
         if self.experiment_manager.stage_number == 2:
             val = perf.overall if perf.overall is not None else 0.0
             if self.overall_value_label:
-                self.overall_value_label.setText(f"{val:.2f}")
+                self.overall_value_label.setText(f'{val:.2f}')
         else:
             left = perf.left if perf.left is not None else perf.overall
             right = perf.right if perf.right is not None else perf.overall
             if self.left_value_label:
-                self.left_value_label.setText(f"{left:.2f}" if left is not None else "-")
+                self.left_value_label.setText(f'{left:.2f}' if left is not None else '-')
             if self.right_value_label:
-                self.right_value_label.setText(f"{right:.2f}" if right is not None else "-")
+                self.right_value_label.setText(f'{right:.2f}' if right is not None else '-')
 
     def _update_corrective_loop(self, corrective_count: int):
         if getattr(self, 'corrective_loop_value_label', None) is not None:
@@ -863,19 +707,20 @@ class ArduinoControlApp(QtWidgets.QMainWindow):
     def _reset_performance_gui(self):
         if self.experiment_manager.stage_number == 2:
             if self.overall_value_label:
-                self.overall_value_label.setText(f"{0:.2f}")
+                self.overall_value_label.setText('0.00')
         else:
             if self.left_value_label:
-                self.left_value_label.setText(f"{0:.2f}")
+                self.left_value_label.setText('0.00')
             if self.right_value_label:
-                self.right_value_label.setText(f"{0:.2f}")
-        self.total_trials_value_label.setText("0")
-        self.correct_count_value_label.setText("0")
+                self.right_value_label.setText('0.00')
+        self.total_trials_value_label.setText('0')
+        if hasattr(self, 'correct_count_value_label'):
+            self.correct_count_value_label.setText('0')
         if getattr(self, 'corrective_loop_value_label', None) is not None:
-            self.corrective_loop_value_label.setText("0")
+            self.corrective_loop_value_label.setText('0')
         # If there are other fields to reset, add them here
         if getattr(self, 'valid_correct_value_label', None) is not None:
-            self.valid_correct_value_label.setText("0")
+            self.valid_correct_value_label.setText('0')
 
     def _update_experiment_state_btn(self):
         self.experiment_state_btn.setEnabled(self._serial_connected and self._folder_selected)
@@ -883,34 +728,28 @@ class ArduinoControlApp(QtWidgets.QMainWindow):
     def on_error(self, msg: BeatBoxMessage | str):
         err = msg.payload if isinstance(msg, BeatBoxMessage) else msg
         self.append_log(f'Error: {err}', logging.ERROR)
-        dialog = QtWidgets.QErrorMessage()
+        dialog = QErrorMessage()
         dialog.showMessage(err)
         dialog.exec_()
 
     def append_log(self, message: str, level: int = logging.DEBUG):
-        colors = {logging.INFO: "yellow", logging.WARNING: "orange", logging.ERROR: "red"}
-        color = colors.get(level, "white")
+        colors = {logging.INFO: 'yellow', logging.WARNING: 'orange', logging.ERROR: 'red'}
+        color = colors.get(level, 'white')
         formatted = f'<font color="{color}">{message}</font>'
         self.log_text.append(formatted)
 
     def _create_animal_info_group(self):
         """Create a group box displaying animal information."""
-        group = QtWidgets.QGroupBox("Animal Information")
-        layout = QtWidgets.QFormLayout(group)
-        # Use subject_info if available, else empty
-        info = self.subject_info if hasattr(self, 'subject_info') and self.subject_info else None
-        self.animal_name_label = QtWidgets.QLabel(info.subject_id if info else "")
-        self.weight_label = QtWidgets.QLabel(str(info.weight) if info else "")
-        self.box_label = QtWidgets.QLabel(info.box if info else "")
-        self.sex_label = QtWidgets.QLabel(info.sex if info else "")
-        self.light_cycle_label = QtWidgets.QLabel(info.light_cycle if info else "")
-        for label in [self.animal_name_label, self.weight_label, self.box_label, self.sex_label, self.light_cycle_label]:
-            label.setTextInteractionFlags(QtCore.Qt.TextSelectableByMouse)
-        layout.addRow("Animal Name:", self.animal_name_label)
-        layout.addRow("Weight (g):", self.weight_label)
-        layout.addRow("Box:", self.box_label)
-        layout.addRow("Sex:", self.sex_label)
-        layout.addRow("Light Cycle:", self.light_cycle_label)
+        group = QGroupBox('Animal Information')
+        layout = QFormLayout(group)
+        info = self.subject_info or SubjectInfo()
+        add_form_fields(layout, self, [
+            FieldSpec('Animal name:', 'animal_name_label', info.subject_id),
+            FieldSpec('Weight (g):',  'weight_label',      str(info.weight)),
+            FieldSpec('Box:',         'box_label',          info.box),
+            FieldSpec('Sex:',         'sex_label',          info.sex),
+            FieldSpec('Light cycle:', 'light_cycle_label',  info.light_cycle),
+        ])
         return group
 
     def _update_phase_label(self, phase_name: str):
@@ -920,50 +759,39 @@ class ArduinoControlApp(QtWidgets.QMainWindow):
         self.stage_label.setText(stage_name)
 
     def show_blinking_alert(self, show: bool):
-        if show:
-            self.blinking_alert_label.setText("⚠️ Pellet delivery loop > 5! Check hardware!")
-        else:
-            self.blinking_alert_label.setText("")
+        txt = '⚠️ Pellet delivery loop > 5! Check hardware!' if show else ''
+        self.blinking_alert_label.setText(txt)
 
     def _handle_pellet_delivery_alert(self, loop_count: int):
         threshold = 15
-        if loop_count > threshold:
-            self.blinking_alert_label.setText(f"⚠️ Pellet delivery loop: {loop_count}! Check hardware!")
-        else:
-            self.blinking_alert_label.setText("")
+        txt = f'⚠️ Pellet delivery loop: {loop_count}! Check hardware!' if  loop_count > threshold else ''
+        self.blinking_alert_label.setText(txt)
 
-class StageSelectDialog(QtWidgets.QDialog):
+class StageSelectDialog(QDialog):
     def __init__(self, parent=None):
         super().__init__(parent)
-        self.setWindowTitle("Select Experiment Stage")
-        layout = QtWidgets.QVBoxLayout(self)
-        self.combo = QtWidgets.QComboBox()
-        # FIXME:SOLID: Hardcoded stage names. Consider using an enum or abstraction for stages (OCP).
-        self.combo.addItems(["All", "S1", "S2", "S3", "S3.1", "S4"]) # FIXME: maybe use enum for stages instead
-        layout.addWidget(QtWidgets.QLabel("Choose experiment stage:"))
-        layout.addWidget(self.combo)
-        # Animal info fields
-        self.animal_name_edit = QtWidgets.QLineEdit()
-        layout.addWidget(QtWidgets.QLabel("Animal name:"))
-        layout.addWidget(self.animal_name_edit)
-        self.weight_edit = QtWidgets.QLineEdit()
-        layout.addWidget(QtWidgets.QLabel("Weight (g):"))
-        layout.addWidget(self.weight_edit)
-        self.box_edit = QtWidgets.QLineEdit()
-        layout.addWidget(QtWidgets.QLabel("Box:"))
-        layout.addWidget(self.box_edit)
-        self.sex_combo = QtWidgets.QComboBox()
-        self.sex_combo.addItems(["X", "Male", "Female"])  # Default unset at X
-        layout.addWidget(QtWidgets.QLabel("Sex:"))
-        layout.addWidget(self.sex_combo)
-        self.light_cycle_combo = QtWidgets.QComboBox()
-        self.light_cycle_combo.addItems(["X", "Red", "White"])  # Default unset at X
-        layout.addWidget(QtWidgets.QLabel("Light cycle:"))
-        layout.addWidget(self.light_cycle_combo)
+        self.setWindowTitle('Select Experiment Stage')
+        layout = QVBoxLayout(self)
 
-        btn = QtWidgets.QPushButton("OK")
-        btn.clicked.connect(self.accept)
-        layout.addWidget(btn)
+        form = QFormLayout()
+        # FIXME:SOLID: Hardcoded stage names. Consider using an enum or abstraction for stages (OCP).
+        self.combo = combo_box(['All', 'S1', 'S2', 'S3', 'S3.1', 'S4'])
+        # Animal info fields
+        self.animal_name_edit = QLineEdit()
+        self.weight_edit = QLineEdit()
+        self.box_edit = QLineEdit()
+        self.sex_combo = combo_box(['X', 'Male', 'Female'])  # Default unset at X
+        self.light_cycle_combo = combo_box(['X', 'Red', 'White'])  # Default unset at X
+
+        form.addRow('Experiment stage:', self.combo)
+        form.addRow('Animal name:',      self.animal_name_edit)
+        form.addRow('Weight (g):',       self.weight_edit)
+        form.addRow('Box:',              self.box_edit)
+        form.addRow('Sex:',              self.sex_combo)
+        form.addRow('Light cycle:',      self.light_cycle_combo)
+
+        layout.addLayout(form)
+        layout.addWidget(push_button('OK', on_clicked=self.accept))
 
     def get_subject_info(self):
         return SubjectInfo(
@@ -987,60 +815,55 @@ class StageSelectDialog(QtWidgets.QDialog):
     def light_cycle(self):
         return self.light_cycle_combo.currentText()
 
+
 def main():
 
-    parser = argparse.ArgumentParser("BeatBox Arduino Control App",
-                                     description="This app allows you to control the BeatBox from "
-                                                 "a python GUI.")
-    parser.add_argument("--with-neopixels", action="store_true", default=False,
-                        help="Include neopixel controls in the GUI.")
-    parser.add_argument("--n-trials", type=int, default=20, help="Number of trials to run.")
-    parser.add_argument("--inter-trial-interval", type=int, default=10000,
-                        help="Interval between trials in milliseconds.")
-    parser.add_argument("--pins-config-file", dest='pins_config_file',
-                        type=str, default="~/.beatbox/pins_config.cfg",
-                        help="Path to the pins configuration file. You should not have to modify this.")
-    parser.add_argument("--from-config-file", type=str, default='',
-                        help="Path to a configuration file to load settings from.")
+    parser = argparse.ArgumentParser('BeatBox Arduino Control App',
+                                     description='This app allows you to control the BeatBox from a python GUI.')
+    parser.add_argument('--with-neopixels', action='store_true', default=False,
+                        help='Include neopixel controls in the GUI.')
+    parser.add_argument('--n-trials', type=int, default=20, help='Number of trials to run.')
+    parser.add_argument('--inter-trial-interval', type=int, default=10000,
+                        help='Interval between trials in milliseconds.')
+    parser.add_argument('--pins-config-file', dest='pins_config_file',
+                        type=str, default='~/.beatbox/pins_config.cfg',
+                        help='Path to the pins configuration file. You should not have to modify this.')
+    parser.add_argument('--from-config-file', type=str, default='',
+                        help='Path to a configuration file to load settings from.')
     args = parser.parse_args()
 
-    app = QtWidgets.QApplication(sys.argv)
+    app = QApplication(sys.argv)
     app.setStyleSheet(qdarkstyle.load_stylesheet())
     config_path = Path(args.pins_config_file).expanduser()
     if not config_path.exists():
-        warnings.warn(f"Config file {config_path} not installed. "
-                      f"Defaulting to the one in the package.")
+        warnings.warn(f'Config file {config_path} not installed. Defaulting to the one in the package.')
         config_path = Path(__file__).parent / 'pins_config.cfg'
 
     # Prompt for stage selection before instantiating ArduinoControlApp
     dialog = StageSelectDialog()
-    if dialog.exec_() != QtWidgets.QDialog.Accepted:
+    if dialog.exec_() != QDialog.Accepted:
         sys.exit(0)
     selected_stage = dialog.selected_stage()
     should_transition = False
-    if "All" in selected_stage:
-        selected_stage = "S1"  # Start from S1 if All is selected
+    if 'All' in selected_stage:
+        selected_stage = 'S1'  # Start from S1 if All is selected
         should_transition = True
 
+    kwargs = dict(stage=selected_stage, transition=should_transition, subject_info=dialog.get_subject_info(),
+                  with_neopixels=args.with_neopixels, n_trials=args.n_trials,
+                  inter_trial_interval=args.inter_trial_interval, experiment_folder='')
 
     # Now instantiate ArduinoControlApp with the correct stage
     if args.from_config_file and os.path.exists(args.from_config_file):
-        params_path = Path(args.from_config_file)
-        if not params_path.exists():
-            raise FileNotFoundError(f"Configuration file {params_path} not found.")
         params = ConfigObj(args.from_config_file, encoding='utf-8',  unrepr=True)
-        window = ArduinoControlApp(str(config_path), experiment_folder=str(Path(args.from_config_file).parent),
-                                   with_neopixels=params['with_neopixels'],
-                                   n_trials=params['n_trials'], inter_trial_interval=params['inter_trial_interval_ms'],
-                                   stage=selected_stage, transition=should_transition, subject_info=dialog.get_subject_info())
-    else:
-        window = ArduinoControlApp(str(config_path), experiment_folder='', with_neopixels=args.with_neopixels,
-                                   n_trials=args.n_trials, inter_trial_interval=args.inter_trial_interval,
-                                   stage=selected_stage, transition=should_transition, subject_info=dialog.get_subject_info())
+        kwargs.update(experiment_folder=str(Path(args.from_config_file).parent), with_neopixels=params['with_neopixels'],
+                      n_trials=params['n_trials'], inter_trial_interval=params['inter_trial_interval_ms'])
+
+    window = ArduinoControlApp(str(config_path), **kwargs)
 
     window.refresh_ports()
     window.show()
     sys.exit(app.exec_())
 
-if __name__ == "__main__":
+if __name__ == '__main__':
     main()
