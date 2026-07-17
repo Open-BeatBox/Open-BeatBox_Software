@@ -164,7 +164,8 @@ class MultiDeviceApp(QMainWindow):
     def _append_log(self, message: str, level: int = logging.DEBUG):
         colors = {logging.INFO: 'yellow', logging.WARNING: 'orange', logging.ERROR: 'red'}
         color = colors.get(level, 'white')
-        formatted = f'<font color="{color}">{message}</font>'
+        escaped = message.replace('\n', '<br>')  # So html formats the new lines correctly
+        formatted = f'<font color="{color}">{escaped}</font>'
         self.log_text.append(formatted)
 
     def closeEvent(self, event):
