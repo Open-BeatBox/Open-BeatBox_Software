@@ -97,6 +97,22 @@ class BeatBoxExperimentManagerS4(BeatBoxExperimentManagerS3):
             relevant_pins={'nose_poke': Edge.RISING}
         )
 
+    def _emit_trial_data(self):
+        """Extend S2's trial data with S4 discovery metrics."""
+        data = {
+            'total_trials': self.get_total_trial_count(),
+            'total_correct': self.get_correct_valid_count(),
+            'correct_count': self.total_correct_trials,
+            'corrective_loops': self.corrective_loop_count,
+            'left_touches': self.left_touches,
+            'right_touches': self.right_touches,
+            'discovery_responses': self._total_discovery_responses,
+            'discovery_rewards': self._total_disc_rewards,
+            'disc_vs_correct_ratio': self._disc_vs_correct_ratio,
+            'disc_vs_incorrect_ratio': self._disc_vs_incorrect_ratio,
+        }
+        self.trialDataUpdated.emit(data)
+
     def _update_experiment_status(self):
         if self._reward_left:
             self.stage_status = 'loop_reward'
@@ -119,7 +135,7 @@ class BeatBoxExperimentManagerS4(BeatBoxExperimentManagerS3):
             self.log(logging.INFO, f'S4_random_roll = S4_roll_failed')
 
     def _phase_discovery_response(self):
-        self.log(logging.DEBUG, f'Discovery response entry')
+        self.log(logging.DEBUG, 'Discovery response entry')
         # FIXME: call order should not influence response registration
         # FIXME: _handle_screen_touch does too much and should be broken into smaller bits and redefined in each stages maybe
         self._register_discovery_response() # needs to be called before _handle_screen_touch
@@ -127,9 +143,11 @@ class BeatBoxExperimentManagerS4(BeatBoxExperimentManagerS3):
         self._handle_screen_touch()
         self.total_valid_trials += 1
         self._total_discovery_responses += 1
+        self._update_discovery_metrics()
         self._roll_for_reward()
         if self._roll_result == 'failed_roll':
             self._advance_trial() # rewards are not delivered, so move to ITI. If success, advancement will be done in retrieval
+        self._emit_trial_data()  # update panel with discovery counts
         self._advance() # force state update to trigger transition based on roll result
 
     def _phase_success_roll(self):

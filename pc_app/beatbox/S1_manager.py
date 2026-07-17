@@ -31,8 +31,6 @@ class BeatBoxExperimentManagerS1(BaseExperimentManager):
     """
     stage_number = 1
 
-    trialNumbersUpdated = QtCore.Signal(int, int)
-
     def __init__(self, experiment_folder, communicator,
                  main_window=None, actuator_pins_cfg: PinConfig = None,
                  subject_info: SubjectInfo = None):
@@ -103,12 +101,12 @@ class BeatBoxExperimentManagerS1(BaseExperimentManager):
         # self.turn_off_screens()
         self.set_outputs(default=True, flush=True)  # Force defaults
         self.waiting_for_pellet_retrieval = False
-        self._update_gui()
+        self._emit_trial_data()
 
-    def _update_gui(self):
-        """ Stage-specific GUI updates.
-        Update the GUI with the current trial number and total trials."""
-        self.trialNumbersUpdated.emit(self.trial_no, self.trial_no)
+    def _emit_trial_data(self):
+        self.trialDataUpdated.emit({
+            'current_trial': self.trial_no,
+        })
 
     def _phase_deliver_pellet(self):
         # don't deliver a reward if somehow there's already something there
@@ -152,7 +150,7 @@ class BeatBoxExperimentManagerS1(BaseExperimentManager):
         self.log(logging.INFO, f'{self.config.s_level} Experiment done.\n'
                                f'Number of trials: {self.trial_no}, number of pellets retrieved: {self.n_pellets_retrieved}')
         self.trial_no = 0
-        self._update_gui()
+        self._emit_trial_data()
         self.stageEnded.emit(self.config.s_level)
 
     def handle_pellet_delivered(self):

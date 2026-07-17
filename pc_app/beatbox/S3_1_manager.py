@@ -31,4 +31,7 @@ class BeatBoxExperimentManagerS3_1(BeatBoxExperimentManagerS3):
         self.set_outputs(off=get_pin_names_from_pattern(PATTERN_ID.FULL_WHITE, 'both'),
                          flatten=True, flush=False)
         self._advance_trial()
-        self.actuatorsStateChanged.emit(self._mask())  # tell GUI to show  # TODO: check
+        self.actuatorsStateChanged.emit(self._mask())
+        # S3.1 has no corrective loop, but still emit trial data for the panel
+        self._emit_trial_data()
+

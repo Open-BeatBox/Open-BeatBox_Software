@@ -28,6 +28,7 @@ from dataclasses import dataclass, field
 from datetime import datetime
 from typing import Callable, Any, Mapping, List, Final, Union, final, Dict, Optional
 
+from PyQt5.QtCore import QTimer
 from configobj import ConfigObj
 from configobj.validate import Validator
 from qtpy import QtCore, QtWidgets
@@ -217,6 +218,23 @@ class PhaseSpec:
         self.timeout_ms = value
 
 
+@dataclass
+class PerformanceData:
+    overall: float = None
+    left: float = None
+    right: float = None
+
+    @property
+    def display_left(self) -> float | None:
+        """Resolved value for display — fallback to overall if absent."""
+        return self.left if self.left is not None else self.overall
+
+    @property
+    def display_right(self) -> float | None:
+        """Resolved value for display — fallback to overall if absent."""
+        return self.right if self.right is not None else self.overall
+
+
 # Grab the actual Qt metaclass that PyQt uses
 QtMeta = type(QtCore.QObject)
 
@@ -237,12 +255,15 @@ class BaseExperimentManager(QtCore.QObject, metaclass=QABCMeta):
     - logging and signal handling
     """
     stage_number = None  # to be set in subclasses
+    trialDataUpdated = QtCore.Signal(dict)
+    performanceUpdated = QtCore.Signal(object)
 
     # shared signals
     pelletRetrieved = QtCore.Signal()  # GUI may connect
     sensorsStateChanged = QtCore.Signal(list)  # low-byte, LSB-first list[bool]
     actuatorsStateChanged = QtCore.Signal(list)  # hi/lo bytes
     setPayloadReady = QtCore.Signal(list, bool)  # final 2-byte mask and flush flag
+    trialStarted = QtCore.Signal(int)
     nextTrialRequested = QtCore.Signal()
 
     stageEnded = QtCore.Signal(str)  # stage name
@@ -413,6 +434,16 @@ class BaseExperimentManager(QtCore.QObject, metaclass=QABCMeta):
 
     # ##################################  PAYLOAD HANDLING  ##################################
 
+    def _emit_trial_data(self):
+        """Emit current trial state as a dict for the stage panel.
+
+        Subclasses must override to include stage-specific keys.
+        Panels render whatever keys match their ``_trial_field_map``
+        and silently ignore the rest.
+        """
+        raise NotImplementedError(
+            f'{self.__class__.__name__} must implement _emit_trial_data')
+
     def emit_payload_ready(self, payload: list[int], flush: bool = False):
         """
         Emit the setPayloadReady signal with the given payload and flush flag.
@@ -433,13 +464,18 @@ class BaseExperimentManager(QtCore.QObject, metaclass=QABCMeta):
         GUI asks to toggle multiple outputs with RGB colors.
         The manager builds the mask and emits it.
         """
-        bitmask = sum(2 ** i for i, checked in enumerate(checked_pins) if checked)
+        bitmask = sum(2**i for i, checked in enumerate(checked_pins) if checked)
 
         payload = [bitmask >> 8, bitmask & 0xff]
 
         if rgb_values is not None:
             payload.extend(rgb_values)
         self.emit_payload_ready(payload)
+
+        # Reward auto-off: if reward pin was set, schedule clearing it
+        reward_idx = self.actuator_pins_cfg.bit_idx('reward')
+        if checked_pins[reward_idx]:
+            QTimer.singleShot(self.reward_duration, self._auto_clear_reward)
 
     def set_outputs(self, on: List[str] = (), off: List[str] = (), flatten: bool = False, flush: bool = False,
                     default: bool = False) -> None:
@@ -478,6 +514,11 @@ class BaseExperimentManager(QtCore.QObject, metaclass=QABCMeta):
 
     def _stop_reward_delivery(self):
         self.set_outputs(flatten=True, flush=True)
+
+    def _auto_clear_reward(self):
+        """Turn off reward after a manual GUI toggle. Unlike _stop_reward_delivery,
+        this only clears the reward pin — other outputs stay as they are."""
+        self.set_outputs(off=['reward'], flatten=False, flush=True)
 
     def turn_off_screens(self):
         self.set_outputs(flatten=True, flush=False)

@@ -4,7 +4,7 @@ Emits ``manualSetRequested`` when the user toggles any control.
 The parent window wires this signal to the experiment manager.
 """
 
-from qtpy.QtCore import Qt, Signal, QTimer
+from qtpy.QtCore import Qt, Signal
 from qtpy.QtGui import QColor, QPixmap
 from qtpy.QtWidgets import (QWidget, QGroupBox, QVBoxLayout, QHBoxLayout, QGridLayout,
                             QLabel, QSlider, QButtonGroup)
@@ -16,8 +16,9 @@ from beatbox.utils import PinConfig
 class HardwarePanel(QWidget):
     """Sensor LEDs + actuator controls + optional neopixels.
 
-    This widget is stage-agnostic — it never changes when the experiment
-    transitions between stages.
+    This widget is stage-agnostic. It reports user actions via
+    ``manualSetRequested`` — all timing and business logic lives
+    in the experiment manager.
     """
     manualSetRequested = Signal(list, object)  # checked list[bool], rgb tuple|None
 
@@ -52,10 +53,6 @@ class HardwarePanel(QWidget):
     @property
     def _sen_cfg(self) -> PinConfig:
         return self._mgr.sensors_pins_config
-
-    @property
-    def _reward_duration_ms(self) -> int:
-        return getattr(self._mgr, 'reward_duration', 150)
 
     # ─── UI construction ──────────────────────────────────────────────
 
@@ -161,11 +158,17 @@ class HardwarePanel(QWidget):
         self._update_color_preview()
         return group
 
-    # ─── Control change → signal ──────────────────────────────────────
+    # ─── Control change → signal ──────────────────────────────────
 
-    def _on_control_changed(self,  checked_pins=None):
-        """Read all actuator states and emit ``manualSetRequested``."""
+    def _on_control_changed(self, checked_pins=None):
+        """Read all actuator states, merge with explicit overrides, and emit.
+
+        Report user actions, the manager handles reward auto-off, pulse duration, etc.
+        """
         ordered_names = self._act_cfg.pin_names
+
+        if not isinstance(checked_pins, (list, tuple, None)):
+            raise ValueError(f'checked_pins should be list, tuple or None, got {type(checked_pins)}')
 
         if checked_pins is None:
             checked = [self.actuator_controls[name].isChecked() for name in ordered_names]
@@ -173,14 +176,10 @@ class HardwarePanel(QWidget):
             checked = [self.actuator_controls[name].isChecked() or pin_on
                        for name, pin_on in zip(ordered_names, checked_pins)]
 
-        # Reward pulse: capture state, uncheck, schedule auto-off
+        # Uncheck reward visually — manager will handle the pulse
         reward_ctrl = self.actuator_controls.get('reward')
         if reward_ctrl:
-            was_active = reward_ctrl.isChecked()
             reward_ctrl.setChecked(False)
-            # FIXME: reward delivery should be handled by the firmware
-            if was_active:
-                QTimer.singleShot(self._reward_duration_ms, self._on_control_changed)
 
         self.manualSetRequested.emit(checked, self.get_rgb_values())
 
@@ -212,7 +211,7 @@ class HardwarePanel(QWidget):
             self.actuator_leds[pin_name].set_state(bool((word >> idx) & 1))  # FIXME: looks like business logic
 
     def show_pellet_alert(self, loop_count: int):
-        """Show or clear the pellet delivery warning."""
+        """Show or clear the pellet delivery warning based on loop count."""
         threshold = 15
         txt = f'⚠️ Pellet delivery loop: {loop_count}! Check hardware!' if loop_count > threshold else ''
         self.blinking_alert_label.setText(txt)

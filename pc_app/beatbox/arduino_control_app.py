@@ -69,6 +69,24 @@ _STAGE_SEQUENCE: dict[str, str | None] = {
 }
 
 
+def transition_stage(current_stage: str, experiment_folder, communicator, main_window, subject_info):
+    """Create the next stage's manager, or return None if terminal.
+
+    Returns (next_label, manager) or None.
+    """
+    if current_stage not in _STAGE_SEQUENCE:
+        raise ValueError(f'Unknown stage "{current_stage}"')
+
+    next_label = _STAGE_SEQUENCE[current_stage]
+    if next_label is None:
+        return None
+
+    manager = _STAGE_MANAGER_CLASSES[next_label](experiment_folder, communicator,
+                                                 main_window=main_window, subject_info=subject_info)
+    return next_label, manager
+
+
+
 class ArduinoControlApp(QMainWindow):
 
     def __init__(self, pins_config_file, experiment_folder='', with_neopixels=False,
@@ -368,24 +386,21 @@ class ArduinoControlApp(QMainWindow):
 
     def handle_stage_end(self, current_stage: str):
         """Transition to the next stage or show completion message."""
-        # FIXME:SOLID: This method handles experiment logic and UI transitions, violating SRP. Should delegate to separate controller/manager.
         if not self.enable_transitions:
             return
 
-        if current_stage not in _STAGE_SEQUENCE:
-            raise ValueError(f'Unknown stage "{current_stage}"')
+        result = transition_stage(current_stage, self.experiment_manager.experiment_folder, self.communicator,
+                                  main_window=self, subject_info=self.subject_info)
 
-        next_label = _STAGE_SEQUENCE[current_stage]
-        if next_label is None:  # terminal stage: stop
+        if result is None:  # terminal stage: stop
             QMessageBox.information(self, f'Stage {current_stage} complete', 'Experiment complete.')
             return
 
+        next_label, manager = result
         self.append_log(f'Stage {current_stage} complete. Moving to "{next_label}".', logging.INFO)
 
-        # Swap manager
-        self.experiment_manager = _STAGE_MANAGER_CLASSES[next_label](self.experiment_manager.experiment_folder,
-                                                                     self.communicator, main_window=self,
-                                                                     subject_info=self.subject_info)
+        # Property setter handles disconnect, deleteLater, hw_panel update
+        self.experiment_manager = manager
 
         # Swap panel and rewire
         self._set_stage_panel(next_label)

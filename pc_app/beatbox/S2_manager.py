@@ -9,7 +9,7 @@ from typing import Dict, Any, List, Optional, NamedTuple
 
 from qtpy import QtCore
 
-from beatbox.experiment_managers import SConfig, BaseExperimentManager, SubjectInfo
+from beatbox.experiment_managers import SConfig, BaseExperimentManager, SubjectInfo, PerformanceData
 
 
 class S2Config(SConfig):
@@ -31,17 +31,7 @@ class S2Config(SConfig):
 
 from beatbox.S1_manager import BeatBoxExperimentManagerS1
 from beatbox.experiment_managers import Phase, PhaseSpec, Edge
-from beatbox.utils import PinConfig, PATTERN_LUT, bitmask_from_pattern, get_pin_names_from_pattern, PATTERN_ID
-
-
-from dataclasses import dataclass
-
-# Flexible performance data structure
-@dataclass
-class PerformanceData:
-    overall: float = None
-    left: float = None
-    right: float = None
+from beatbox.utils import PinConfig, PATTERN_LUT, get_pin_names_from_pattern, PATTERN_ID
 
 
 class BeatBoxExperimentManagerS2(BeatBoxExperimentManagerS1):
@@ -55,9 +45,6 @@ class BeatBoxExperimentManagerS2(BeatBoxExperimentManagerS1):
     which specifies the link between phases, timeouts, and actions to take on entering each phase.
     """
     stage_number = 2
-
-    performanceUpdated = QtCore.Signal(object)
-    correctiveLoopUpdated = QtCore.Signal(int)
 
     def __init__(self, experiment_folder, communicator,
                  main_window=None, actuator_pins_cfg: PinConfig = None,
@@ -205,10 +192,6 @@ class BeatBoxExperimentManagerS2(BeatBoxExperimentManagerS1):
         self.check_performance()
         self.log_experiment_data()
 
-    def _update_gui(self):
-        """ Override parent method to update the GUI """
-        self.trialNumbersUpdated.emit(self.get_correct_valid_count(), self.get_total_trial_count())
-
     def _phase_wait_tunnel(self):
         self.tunnel_entered = False
 
@@ -251,13 +234,24 @@ class BeatBoxExperimentManagerS2(BeatBoxExperimentManagerS1):
                          flatten=True, flush=False)
         self.corrective_loop_count += 1
         self.total_corrective_loop_trials += 1
-        self.correctiveLoopUpdated.emit(self.corrective_loop_count)
+        self._emit_trial_data()
         self.actuatorsStateChanged.emit(self._mask())  # tell GUI to show  # TODO: check
 
     def _phase_wait_pellet_retrieval(self):
         super()._phase_wait_pellet_retrieval()
         self.corrective_loop_count = 0  # reset for next trial
-        self.correctiveLoopUpdated.emit(self.corrective_loop_count)
+        self._emit_trial_data()
+
+    def _emit_trial_data(self):
+        """Emit current trial state as a dict — panels render whatever keys they need."""
+        self.trialDataUpdated.emit({
+            'total_trials': self.get_total_trial_count(),
+            'total_correct': self.get_correct_valid_count(),
+            'correct_count': self.total_correct_trials,
+            'corrective_loops': self.corrective_loop_count,
+            'left_touches': self.left_touches,
+            'right_touches': self.right_touches,
+        })
 
     # Handle screen touch, register response, compute performance and log it
     def _handle_screen_touch(self):
@@ -294,7 +288,7 @@ class BeatBoxExperimentManagerS2(BeatBoxExperimentManagerS1):
                 overall=self.get_overall_performance()
             )
             self.performanceUpdated.emit(perf)
-            self.trialNumbersUpdated.emit(self.get_correct_valid_count(), self.get_total_trial_count())
+            self._emit_trial_data()
 
         self.log(logging.INFO, f"{response_type.title()} response on {pin_name}.")
 
@@ -320,21 +314,12 @@ class BeatBoxExperimentManagerS2(BeatBoxExperimentManagerS1):
                 self.total_invalid_trials += 1
             # After updating, recompute performance
             self.compute_performance()
-            ## TODO: find a more flexible to display either overall performance or side performances
-            ## This is a quick hack to not update the GUI fields
-            if self.stage_number == 2:
-                perf = PerformanceData(
-                    overall=self.get_overall_performance()
-                )
-                self.performanceUpdated.emit(perf)
-            else:
-                perf = PerformanceData(
-                    left=self.get_left_performance(),
-                    right=self.get_right_performance(),
-                    overall=self.get_overall_performance()
-                )
-                self.performanceUpdated.emit(perf)
-            self.trialNumbersUpdated.emit(self.get_correct_valid_count(), self.get_total_trial_count())
+            self.performanceUpdated.emit(PerformanceData(
+                left=self.get_left_performance(),
+                right=self.get_right_performance(),
+                overall=self.get_overall_performance()
+            ))
+            self._emit_trial_data()
         # Reset last response info
         self._last_trial_side = None
         self._last_response_type = None
