@@ -1,3 +1,6 @@
+# Screen module – drawing functions ported from screen_tasks.ino
+# Uses the 8-bit parallel ILI9341 driver (libs/ILI9341-parallel-TFT-driver-for-micropython/ILI9341.py)
+
 import asyncio
 
 from MCP2515 import MCP2515 as CAN
@@ -7,82 +10,229 @@ from beatbox_module import ModuleManager
 from bb_pin_map import ScreenPins as pinMap
 
 from random import getrandbits
-from time import sleep_ms,ticks_ms, ticks_diff
+from time import sleep_ms, ticks_ms, ticks_diff
 import ILI9341
 
-XP = pinMap.LCD_D0
-YM = pinMap.LCD_D1
-YP = pinMap.LCD_CS
-XM = pinMap.LCD_RS
+try:
+    import micropython
+except ImportError:
+    # Host-side fallback so this module can still be imported outside MicroPython.
+    class _MicroPythonFallback:
+        @staticmethod
+        def viper(func):
+            return func
 
-# Init the LCD screen
-tft = ILI9341.screen(pinMap.LCD_RD, pinMap.LCD_WR, pinMap.LCD_RS, pinMap.LCD_CS, pinMap.LCD_RST, pinMap.LCD_D0,
-                     pinMap.LCD_D1, pinMap.LCD_D2, pinMap.LCD_D3, pinMap.LCD_D4, pinMap.LCD_D5, pinMap.LCD_D6,
-                     pinMap.LCD_D7)
+    micropython = _MicroPythonFallback()
+    ptr8 = int
 
-#Assign human-readable names to some common 16-bit color values:
-BLACK       =   0x0000
-BLUE        =   0x001F
-RED         =   0xF800
-GREEN       =   0x07E0
-CYAN        =   0x07FF
-MAGENTA     =   0xF81F
-YELLOW      =   0xFFE0
-WHITE       =   0xFFFF
-GRAY        =   0x8410
+# ── Display init (parallel 8-bit) ─────────────────────────────────────────────
+tft = ILI9341.screen(
+    pinMap.LCD_RD, pinMap.LCD_WR, pinMap.LCD_RS, pinMap.LCD_CS, pinMap.LCD_RST,
+    pinMap.LCD_D0, pinMap.LCD_D1, pinMap.LCD_D2, pinMap.LCD_D3,
+    pinMap.LCD_D4, pinMap.LCD_D5, pinMap.LCD_D6, pinMap.LCD_D7,
+)
 
-def testgreen():
-    test(32,10,64)
+# ── Screen dimensions ─────────────────────────────────────────────────────────
+# Adjust if rotation changes the logical width/height (tft.setrotation swaps them).
+WIDTH  = 240
+HEIGHT = 320
 
-def testblue():
-    test(0,10,1)
+# ── Color constants (16-bit RGB565) ───────────────────────────────────────────
+BLACK   = 0x0000
+BLUE    = 0x001F
+RED     = 0xF800
+GREEN   = 0x07E0
+CYAN    = 0x07FF
+MAGENTA = 0xF81F
+YELLOW  = 0xFFE0
+WHITE   = 0xFFFF
+GRAY    = 0x8410
 
-def testred():
-    test(2048,11,2048)
+# ── Diagonal pattern constants ────────────────────────────────────────────────
+# 8 px white stripe, 8 px black stripe → 45° diagonals when shift_per_row = 1
+_DIAGONAL_PATTERN = bytes([0xFF, 0x00])
+_PATTERN_LENGTH   = 16
 
-def test(colini,step,coladd):
-    col=colini
-    for i in range(0,319,step):
-        #print("i= ",i,"\t color=",col)
-        tft.fillRect(i,0,step,319,col)
-        col=col+coladd
+# Direction constants (mirror of the C++ DiagonalDirection enum)
+TRBL = 0   # Top-right → bottom-left
+TLBR = 1   # Top-left  → bottom-right
 
-def testinit():
-    global t1,t2,t3,t4
-    start = ticks_ms()
-    tft.fillscreen(getrandbits(16))
-    tft.fillRect(10,10,80,80,getrandbits(16))
-    tft.fillRect(230,10,80,80,getrandbits(16))
-    tft.fillRect(10,150,80,80,getrandbits(16))
-    tft.fillRect(230,150,80,80,getrandbits(16))
-    tft.drawLine(0,0,319,239,getrandbits(16))
-    tft.drawLine(0,239,319,0,getrandbits(16))
-    color=getrandbits(16)
-    tft.fillRect(155,90,10,60,color)
-    tft.fillRect(130,115,60,10,color)
-    tft.drawCircle(160,120,100,getrandbits(16))
-    tft.drawDisk(160,120,50,60,getrandbits(16))
-    end = ticks_ms()
-    t1=ticks_diff(end,start)
-    start = ticks_ms()
-    testblue()
-    end = ticks_ms()
-    t2=ticks_diff(end,start)
-    start = ticks_ms()
-    testgreen()
-    end = ticks_ms()
-    t3=ticks_diff(end,start)
-    start = ticks_ms()
-    testred()
-    end = ticks_ms()
-    t4=ticks_diff(end,start)
+_WHITE_HI = (WHITE >> 8) & 0xFF
+_WHITE_LO = WHITE & 0xFF
+_BLACK_HI = (BLACK >> 8) & 0xFF
+_BLACK_LO = BLACK & 0xFF
 
-def printv(mess):
-    for i in mess:
-        tft.drawchar(i)
-        if tft.x_cursor>tft._width:
-            tft.x_cursor=0
-            tft.y_cursor = tft.y_cursor+tft.Char_height
+
+@micropython.viper
+def _build_diagonal_row_viper(
+    row_buf: ptr8,
+    width: int,
+    pattern_pos: int,
+    pattern_len: int,
+    direction: int,
+    is_white: ptr8,
+    white_hi: int,
+    white_lo: int,
+    black_hi: int,
+    black_lo: int,
+):
+    """Fill one RGB565 row buffer using viper integer loops."""
+    x = 0
+    idx = 0
+    while x < width:
+        # Keep this as a literal inside viper code (global lookups are objects).
+        if direction == 0:
+            px = (x + pattern_pos) % pattern_len
+        else:
+            px = (x - pattern_pos + pattern_len) % pattern_len
+
+        if is_white[px]:
+            row_buf[idx] = white_hi
+            row_buf[idx + 1] = white_lo
+        else:
+            row_buf[idx] = black_hi
+            row_buf[idx + 1] = black_lo
+
+        x += 1
+        idx += 2
+
+
+def _write_row_rgb565(y: int, row_buf: bytearray) -> None:
+    """Write one full RGB565 row in a single address window transaction."""
+    tft.setAddrWindow(0, y, WIDTH - 1, y)
+    tft.CS_ACTIVE()
+    tft.WriteCmd(tft._MW)
+    for b in row_buf:
+        tft.write8(b)
+    tft.CS_IDLE()
+
+
+# ── Functions ported from screen_tasks.ino ────────────────────────────────────
+
+def draw_vlines(thick: int = 1,
+                num_lines: int = 10,
+                edge_margin: int = 10) -> None:
+    """Draw evenly-spaced white vertical lines on a black background.
+    """
+    tft.fillRect(0, 0, WIDTH, HEIGHT, BLACK)
+
+    available_width = WIDTH - 2 * edge_margin
+    spacing = available_width // (num_lines - 1)
+
+    for i in range(num_lines):
+        center = edge_margin + i * spacing
+        for t in range(thick + 1):
+            tft.drawFastVLine(center + t, 0, HEIGHT, WHITE)
+            tft.drawFastVLine(center - t, 0, HEIGHT, WHITE)
+
+
+def draw_hlines(thick: int = 1,
+                num_lines: int = 15,
+                edge_margin: int = 10) -> None:
+    """Draw evenly-spaced white horizontal lines on a black background.
+    """
+    tft.fillRect(0, 0, WIDTH, HEIGHT, BLACK)
+
+    available_height = HEIGHT - 2 * edge_margin
+    spacing = available_height // (num_lines - 1)
+
+    for i in range(num_lines):
+        center = edge_margin + i * spacing
+        for t in range(thick + 1):
+            tft.drawFastHLine(0, center + t, WIDTH, WHITE)
+            tft.drawFastHLine(0, center - t, WIDTH, WHITE)
+
+
+def draw_grid(thick: int = 1,
+              num_vlines: int = 10,
+              num_hlines: int = 15,
+              edge_margin: int = 10) -> None:
+    """Draw a white grid on a black background.
+
+    Combines vertical and horizontal lines in a single screen clear.
+    """
+    tft.fillRect(0, 0, WIDTH, HEIGHT, BLACK)
+
+    # Vertical lines
+    av_w = WIDTH - 2 * edge_margin
+    v_spacing = av_w // (num_vlines - 1)
+    for i in range(num_vlines):
+        center = edge_margin + i * v_spacing
+        for t in range(thick + 1):
+            tft.drawFastVLine(center + t, 0, HEIGHT, WHITE)
+            tft.drawFastVLine(center - t, 0, HEIGHT, WHITE)
+
+    # Horizontal lines
+    av_h = HEIGHT - 2 * edge_margin
+    h_spacing = av_h // (num_hlines - 1)
+    for i in range(num_hlines):
+        center = edge_margin + i * h_spacing
+        for t in range(thick + 1):
+            tft.drawFastHLine(0, center + t, WIDTH, WHITE)
+            tft.drawFastHLine(0, center - t, WIDTH, WHITE)
+
+
+def draw_diagonal_pattern(direction: int = TRBL,
+                           pattern: bytes = _DIAGONAL_PATTERN,
+                           pattern_length: int = _PATTERN_LENGTH,
+                           shift_per_row: int = 1) -> None:
+    """Draw a diagonal stripe pattern across the full WIDTH×HEIGHT screen.
+
+    Implemented performance improvements:
+      1) The per-pixel row generation loop now runs in a @micropython.viper
+         function (`_build_diagonal_row_viper`).
+      2) Each line is pre-built as an RGB565 bytearray and pushed with a single
+         address-window transaction (`_write_row_rgb565`).
+
+    Remaining options to explore for improved performance:
+      3) Move the row write itself to viper/native code (avoid Python `for b`).
+      4) Use the RP2040 PIO path (`ILI9341_RP2_PIO`) to stream writes via DMA.
+
+    Args:
+        direction:      TRBL or TLBR – controls which way the stripe leans.
+        pattern:        Bytes where each bit (MSB first) = 1 means white pixel.
+        pattern_length: Total number of bits in the repeating pattern.
+        shift_per_row:  Pixels the pattern shifts horizontally per row.
+    """
+    tft.fillscreen(BLACK)
+
+    # Decode bit pattern once into 0/1 bytes for viper-friendly lookup.
+    is_white = bytearray(pattern_length)
+    for i in range(pattern_length):
+        byte_val = pattern[i // 8]
+        bit = 7 - (i % 8)   # MSB first – matches the Arduino original
+        is_white[i] = 1 if (byte_val & (1 << bit)) else 0
+
+    row_buf = bytearray(WIDTH * 2)
+    pattern_pos = 0
+    for y in range(HEIGHT):
+        _build_diagonal_row_viper(
+            row_buf,
+            WIDTH,
+            pattern_pos,
+            pattern_length,
+            direction,
+            is_white,
+            _WHITE_HI,
+            _WHITE_LO,
+            _BLACK_HI,
+            _BLACK_LO,
+        )
+        _write_row_rgb565(y, row_buf)
+
+        pattern_pos = (pattern_pos + shift_per_row) % pattern_length
+
+
+def draw_diagonal_lines_trbl(shift_per_row: int = 1) -> None:
+    """Diagonal stripes leaning top-right → bottom-left.
+    """
+    draw_diagonal_pattern(TRBL, shift_per_row=shift_per_row)
+
+
+def draw_diagonal_lines_tlbr(shift_per_row: int = 1) -> None:
+    """Diagonal stripes leaning top-left → bottom-right.
+    """
+    draw_diagonal_pattern(TLBR, shift_per_row=shift_per_row)
 
 class ScreenModule(ModuleManager):
     def __init__(self):
@@ -105,9 +255,15 @@ class ScreenModule(ModuleManager):
             self.led.off()
             await asyncio.sleep(0.1)
 
-# Start tasks
 def main():
     screen = ScreenModule()
-    tft.setrotation(3)
-    testinit()
+    tft.begin()
+    # Visual validation: cycle through all ported patterns
+    draw_vlines()
+    draw_hlines()
+    draw_grid()
+    draw_diagonal_lines_trbl()
+    draw_diagonal_lines_tlbr()
     asyncio.run(screen.start_managers())
+
+
