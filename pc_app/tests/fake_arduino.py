@@ -1,10 +1,9 @@
 import os
 import pty
-import serial
 import time
 import threading
 
-from beatbox.serial_com import BeatBoxMessage
+from beatbox.comm.serial_com import BeatBoxMessage
 
 
 class MockArduino:

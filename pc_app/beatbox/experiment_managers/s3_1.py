@@ -3,10 +3,12 @@ from __future__ import annotations
 from collections import deque
 from pathlib import Path
 
-from beatbox.S2_manager import S2Config
-from beatbox.S3_manager import BeatBoxExperimentManagerS3
-from beatbox.experiment_managers import SubjectInfo
-from beatbox.utils import PinConfig, get_pin_names_from_pattern, PATTERN_ID
+from beatbox.experiment_managers.s2 import S2Config
+from beatbox.experiment_managers.s3 import BeatBoxExperimentManagerS3
+from beatbox.experiment_managers.base import SubjectInfo
+from beatbox.experiment_managers.patterns import PATTERN_ID, get_pin_names_from_pattern
+from beatbox.comm.pin_config import PinConfig
+
 
 class BeatBoxExperimentManagerS3_1(BeatBoxExperimentManagerS3):
     """

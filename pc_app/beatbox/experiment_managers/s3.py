@@ -2,12 +2,11 @@ from __future__ import annotations
 
 from collections import deque
 from pathlib import Path
-from qtpy import QtCore
 import logging
 
-from beatbox.S2_manager import BeatBoxExperimentManagerS2, S2Config
-from beatbox.experiment_managers import SubjectInfo, BaseExperimentManager
-from beatbox.utils import PinConfig
+from beatbox.experiment_managers.s2 import BeatBoxExperimentManagerS2, S2Config
+from beatbox.experiment_managers.base import SubjectInfo, BaseExperimentManager
+from beatbox.comm.pin_config import PinConfig
 
 
 class BeatBoxExperimentManagerS3(BeatBoxExperimentManagerS2):

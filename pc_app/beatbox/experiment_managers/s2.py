@@ -5,11 +5,9 @@ from collections import deque
 from pathlib import Path
 import time
 
-from typing import Dict, Any, List, Optional, NamedTuple
+from typing import Dict, Any, List, Optional
 
-from qtpy import QtCore
-
-from beatbox.experiment_managers import SConfig, BaseExperimentManager, SubjectInfo, PerformanceData
+from beatbox.experiment_managers.base import SConfig, BaseExperimentManager, SubjectInfo, PerformanceData
 
 
 class S2Config(SConfig):
@@ -29,9 +27,10 @@ class S2Config(SConfig):
     right_screen_sequence: List[str]
 
 
-from beatbox.S1_manager import BeatBoxExperimentManagerS1
-from beatbox.experiment_managers import Phase, PhaseSpec, Edge
-from beatbox.utils import PinConfig, PATTERN_LUT, get_pin_names_from_pattern, PATTERN_ID
+from beatbox.experiment_managers.s1 import BeatBoxExperimentManagerS1
+from beatbox.experiment_managers.base import Phase, PhaseSpec, Edge
+from beatbox.experiment_managers.patterns import PATTERN_ID, PATTERN_LUT, get_pin_names_from_pattern
+from beatbox.comm.pin_config import PinConfig
 
 
 class BeatBoxExperimentManagerS2(BeatBoxExperimentManagerS1):

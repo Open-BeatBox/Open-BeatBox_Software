@@ -2,13 +2,12 @@ from __future__ import annotations
 
 import logging
 from pathlib import Path
-from typing import Dict, Any, List, Optional
+from typing import Dict, Any, Optional
 
-from configobj import ConfigObj
-from qtpy import QtWidgets, QtCore
+from qtpy import QtWidgets
 
-from beatbox.experiment_managers import BaseExperimentManager, Phase, PhaseSpec, Edge, SConfig, SubjectInfo
-from beatbox.utils import PinConfig
+from beatbox.experiment_managers.base import BaseExperimentManager, Phase, PhaseSpec, Edge, SConfig, SubjectInfo
+from beatbox.comm.pin_config import PinConfig
 
 
 class S1Config(SConfig):

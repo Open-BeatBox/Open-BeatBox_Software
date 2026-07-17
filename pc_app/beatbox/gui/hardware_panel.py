@@ -9,8 +9,8 @@ from qtpy.QtGui import QColor, QPixmap
 from qtpy.QtWidgets import (QWidget, QGroupBox, QVBoxLayout, QHBoxLayout, QGridLayout,
                             QLabel, QSlider, QButtonGroup)
 
-from beatbox.qt_utils import LEDIndicator, check_box, push_button, color_swatch
-from beatbox.utils import PinConfig
+from beatbox.gui.qt_utils import LEDIndicator, check_box, push_button, color_swatch
+from beatbox.comm.pin_config import PinConfig
 
 
 class HardwarePanel(QWidget):

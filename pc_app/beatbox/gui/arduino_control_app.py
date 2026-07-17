@@ -33,18 +33,18 @@ from qtpy.QtWidgets import (
 )
 import qdarkstyle
 
-from beatbox.bb_logging import qt_handler, logger
-from beatbox.experiment_managers import SubjectInfo
-from beatbox.S1_manager import BeatBoxExperimentManagerS1
-from beatbox.S2_manager import BeatBoxExperimentManagerS2
-from beatbox.S3_manager import BeatBoxExperimentManagerS3
-from beatbox.S3_1_manager import BeatBoxExperimentManagerS3_1
-from beatbox.S4_manager import BeatBoxExperimentManagerS4
-from beatbox.qt_utils import (labeled_spinbox, push_button, swap_button, combo_box,
-                              selectable_label, safe_delete, add_form_fields, FieldSpec)
-from beatbox.serial_com import get_platform_serial_ports, BeatBoxCommunicator, BeatBoxMessage, HandshakeWorker
-from beatbox.hardware_panel import HardwarePanel
-from beatbox.stage_panels import create_stage_panel
+from beatbox.gui.bb_logging import qt_handler, logger
+from beatbox.experiment_managers.base import SubjectInfo
+from beatbox.experiment_managers.s1 import BeatBoxExperimentManagerS1
+from beatbox.experiment_managers.s2 import BeatBoxExperimentManagerS2
+from beatbox.experiment_managers.s3 import BeatBoxExperimentManagerS3
+from beatbox.experiment_managers.s3_1 import BeatBoxExperimentManagerS3_1
+from beatbox.experiment_managers.s4 import BeatBoxExperimentManagerS4
+from beatbox.gui.qt_utils import (labeled_spinbox, push_button, swap_button, combo_box,
+                                  selectable_label, safe_delete, add_form_fields, FieldSpec)
+from beatbox.comm.serial_com import get_platform_serial_ports, BeatBoxCommunicator, BeatBoxMessage, HandshakeWorker
+from beatbox.gui.hardware_panel import HardwarePanel
+from beatbox.gui.stage_panels import create_stage_panel
 
 
 SERIAL_TIMEOUT = 2

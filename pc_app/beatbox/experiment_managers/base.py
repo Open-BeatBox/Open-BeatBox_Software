@@ -1,8 +1,8 @@
 """
 This module contains the base classes for managing experiments in BeatBox.
 
-It provides the `BaseExperimentManager` class, which serves as an abstract base class for all experiment managers,
-All experiment managers should inherit from this class and implement the required methods.
+It provides the `BaseExperimentManager` class, which serves as an abstract base class for all experiment experiment_managers,
+All experiment experiment_managers should inherit from this class and implement the required methods.
 They are typically called  BeatBoxExperimentManagerS<n> where <n> is the stage number of the experiment.
 and the `BeatBoxExperimentManagerS1` and `BeatBoxExperimentManagerS2` classes, which implement the basic functionality
 
@@ -26,16 +26,16 @@ from pathlib import Path
 from enum import Enum, auto
 from dataclasses import dataclass, field
 from datetime import datetime
-from typing import Callable, Any, Mapping, List, Final, Union, final, Dict, Optional
+from typing import Callable, Any, Mapping, List, Final, Union, final, Optional
 
 from PyQt5.QtCore import QTimer
 from configobj import ConfigObj
 from configobj.validate import Validator
 from qtpy import QtCore, QtWidgets
 
-from beatbox.serial_com import BeatBoxCommunicator, SetPayloadOutputBus
-from beatbox.utils import PinConfig, load_pin_config, get_pin_names_from_pattern
-from beatbox.validators import list_w_choice
+from beatbox.comm.serial_com import BeatBoxCommunicator, SetPayloadOutputBus
+from beatbox.comm.pin_config import PinConfig, load_pin_config
+from beatbox.config.validators import list_w_choice
 
 ANY_PIN: Final = object()
 
@@ -246,7 +246,7 @@ class QABCMeta(QtMeta, ABCMeta):
 
 class BaseExperimentManager(QtCore.QObject, metaclass=QABCMeta):
     """
-    Abstract base class for all experiment managers.
+    Abstract base class for all experiment experiment_managers.
 
     This class defines the basic structure and functionality for managing experiments.
     It notably handles:
@@ -586,7 +586,7 @@ class BaseExperimentManager(QtCore.QObject, metaclass=QABCMeta):
 
         self.experiment_folder = experiment_folder
         Path(experiment_folder).mkdir(parents=True, exist_ok=True)
-        Path(experiment_folder).joinpath('config').mkdir(parents=True, exist_ok=True)
+        Path(experiment_folder).joinpath('../config').mkdir(parents=True, exist_ok=True)
 
     # ############################ TEMPLATE METHODS ############################
     def _dispatch_changed_pin(self, pin_name: str, edge: Edge):
@@ -651,7 +651,7 @@ class ExperimentCSVLogger:
 
 # FIXME: this is a bit redundant with ExperimentCSVLogger, we could merge them and have a single logger with more flexible logging method
 # FIXME: this mainly used by S2 and S3 so it should be defined there
-# Maybe make an abstract CSV logger class that should be implemented in S managers?
+# Maybe make an abstract CSV logger class that should be implemented in S experiment_managers?
 class LightExperimentCSVLogger:
     def __init__(self, experiment_folder, stage_number, subject_info: SubjectInfo = None):
         self.start_time = time.time() * 1000

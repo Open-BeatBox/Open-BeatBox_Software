@@ -2,10 +2,10 @@ import time
 
 import pytest
 
-from beatbox.serial_com import BeatBoxCommunicator
+from beatbox.comm.serial_com import BeatBoxCommunicator
 from tests.fake_arduino import MockArduino
 
-from beatbox.bb_logging import logger, QtHandler
+from beatbox.gui.bb_logging import logger, QtHandler
 
 for h in logger.handlers[:]:
     if isinstance(h, QtHandler):

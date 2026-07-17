@@ -11,8 +11,8 @@ from abc import abstractmethod
 
 from qtpy.QtWidgets import QWidget, QGroupBox, QLayout, QVBoxLayout, QHBoxLayout
 
-from beatbox.qt_utils import add_labeled_fields, FieldSpec, labeled_spinbox, labeled_double_spinbox, _derive_attr
-from beatbox.bb_logging import logger
+from beatbox.gui.qt_utils import add_labeled_fields, FieldSpec, labeled_spinbox, labeled_double_spinbox, _derive_attr
+from beatbox.gui.bb_logging import logger
 
 
 class StagePanel(QWidget):

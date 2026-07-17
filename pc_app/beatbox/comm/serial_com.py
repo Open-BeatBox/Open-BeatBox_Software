@@ -10,9 +10,8 @@ from PyQt5 import QtCore
 from PyQt5.QtCore import pyqtSignal
 from serial.tools import list_ports
 
-from beatbox.bb_logging import logger  # shared logger
-from beatbox.utils import crc8
-
+from beatbox.gui.bb_logging import logger  # shared logger
+from beatbox.comm.crc import crc8
 
 IN_TEST = 'pytest' in globals()
 DEBUG = True

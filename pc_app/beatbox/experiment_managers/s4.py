@@ -3,10 +3,11 @@ from collections import deque
 from pathlib import Path
 from typing import List
 
-from beatbox.S2_manager import S2Config
-from beatbox.S3_manager import BeatBoxExperimentManagerS3
-from beatbox.experiment_managers import SubjectInfo, Phase, PhaseSpec, Edge
-from beatbox.utils import PinConfig
+from beatbox.experiment_managers.s2 import S2Config
+from beatbox.experiment_managers.s3 import BeatBoxExperimentManagerS3
+from beatbox.experiment_managers.base import SubjectInfo, Phase, PhaseSpec, Edge
+from beatbox.comm.pin_config import PinConfig
+
 
 class S4Config(S2Config):
     s_level = 'S4'
