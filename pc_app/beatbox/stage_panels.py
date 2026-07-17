@@ -73,7 +73,7 @@ class StagePanel(QWidget):
             if label is not None:
                 label.setText(spec.initial)
 
-    def _update_trial_data(self, data: dict):  # FIXME: missing default
+    def _update_trial_data(self, data: dict):
         """Generic trial data renderer — driven by ``_trial_field_map``.
 
         Unknown keys are logged at debug level, not crashed on.
@@ -153,12 +153,6 @@ class S2Panel(StagePanel):
         val = perf.overall if perf.overall is not None else 0.0
         self.overall_value_label.setText(f'{val:.2f}')
 
-    def _update_trial_numbers(self, correct_count, total_trials):
-        self.total_trials_value_label.setText(str(total_trials))
-        self.valid_correct_value_label.setText(str(getattr(self._mgr, 'total_correct_trials', 0)))
-        self.left_touches_value_label.setText(str(getattr(self._mgr, 'left_touches', 0)))
-        self.right_touches_value_label.setText(str(getattr(self._mgr, 'right_touches', 0)))
-
     def update_params_from_manager(self):
         self.error_flash_spinbox.setValue(self._mgr.error_flash_ms)
         self.learning_threshold_spinbox.setValue(self._mgr.config.learning_threshold)
@@ -202,14 +196,6 @@ class S3Panel(S2Panel):
         right = perf.display_right
         self.left_value_label.setText(f'{left:.2f}' if left is not None else '-')
         self.right_value_label.setText(f'{right:.2f}' if right is not None else '-')
-
-    def _update_trial_numbers(self, correct_count, total_trials):
-        self.total_trials_value_label.setText(str(total_trials))
-        self.valid_correct_value_label.setText(str(getattr(self._mgr, 'total_correct_trials', 0)))
-        self.correct_count_value_label.setText(str(correct_count))
-
-    def _update_corrective_loop(self, count):
-        self.corrective_loop_value_label.setText(str(count))
 
 
 class S3_1Panel(S3Panel):
