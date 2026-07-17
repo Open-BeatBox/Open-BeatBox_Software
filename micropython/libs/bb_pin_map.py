@@ -18,10 +18,21 @@ class PinMap:
     USER_LED = 25
 
 class NosepokePins(PinMap):
-    """Pin mapping for Nosepoke module."""
+    """Pin mapping for nosepoke module."""
     IR_BEAM_OUT = 9
     IR_BEAM_IN = 10
 
 class ScreenPins(PinMap):
-    """Pin mapping for Nosepoke module."""
+    """Pin mapping for screen module."""
     IR_BEAM = 20
+
+class FeederPins(PinMap):
+    """Pin mapping for feeder module."""
+    MOTOR_EN = 5
+    MOTOR_RST = 6
+    MOTOR_SLEEP = 7
+    MOTOR_DIR = 9
+    MOTOR_STEP = 10
+    MOTOR_MS3 = 11
+    MOTOR_MS2 = 12
+    MOTOR_MS1 = 13

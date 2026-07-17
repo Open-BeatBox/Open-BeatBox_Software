@@ -4,7 +4,7 @@ from MCP2515 import MCP2515 as CAN
 from machine import Pin, SPI
 
 from beatbox_module import ModuleManager
-from bb_pin_map import NosepokePins as Pin_map
+from bb_pin_map import NosepokePins as PinMap
 
 class NosepokeModule(ModuleManager):
     def __init__(self):
@@ -15,9 +15,9 @@ class NosepokeModule(ModuleManager):
 
 
     def _init_ir_beam(self):
-        self.sensor_in = Pin(Pin_map.IR_BEAM_IN, Pin.OUT)
+        self.sensor_in = Pin(PinMap.IR_BEAM_IN, Pin.OUT)
         self.sensor_in.high()
-        self.sensor_out = Pin(Pin_map.IR_BEAM_OUT, Pin.IN)
+        self.sensor_out = Pin(PinMap.IR_BEAM_OUT, Pin.IN)
         self.sensor_out.irq(trigger=Pin.IRQ_FALLING, handler=lambda pin: self._on_poke())
 
     def _on_poke(self):
