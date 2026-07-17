@@ -5,7 +5,7 @@ from typing import List
 
 from beatbox.experiment_managers.s2 import S2Config
 from beatbox.experiment_managers.s3 import BeatBoxExperimentManagerS3
-from beatbox.experiment_managers.base import SubjectInfo, Phase, PhaseSpec, Edge
+from beatbox.experiment_managers.types import SubjectInfo, Edge, Phase, PhaseSpec
 from beatbox.comm.pin_config import PinConfig
 
 

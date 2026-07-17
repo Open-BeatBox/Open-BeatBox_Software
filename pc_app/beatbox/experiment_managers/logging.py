@@ -6,7 +6,7 @@ from abc import ABC, abstractmethod
 from datetime import datetime
 from pathlib import Path
 
-from beatbox.experiment_managers.base import SubjectInfo
+from beatbox.experiment_managers.types import SubjectInfo
 
 
 class BaseCSVLogger(ABC):

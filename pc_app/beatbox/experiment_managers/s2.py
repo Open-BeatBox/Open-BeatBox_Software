@@ -7,7 +7,8 @@ import time
 
 from typing import Dict, Any, List, Optional
 
-from beatbox.experiment_managers.base import SConfig, BaseExperimentManager, SubjectInfo, PerformanceData
+from beatbox.experiment_managers.base import SConfig, BaseExperimentManager
+from beatbox.experiment_managers.types import SubjectInfo, Edge, Phase, PhaseSpec, PerformanceData
 
 
 class S2Config(SConfig):
@@ -28,7 +29,6 @@ class S2Config(SConfig):
 
 
 from beatbox.experiment_managers.s1 import BeatBoxExperimentManagerS1
-from beatbox.experiment_managers.base import Phase, PhaseSpec, Edge
 from beatbox.experiment_managers.patterns import PATTERN_ID, PATTERN_LUT, get_pin_names_from_pattern
 from beatbox.comm.pin_config import PinConfig
 

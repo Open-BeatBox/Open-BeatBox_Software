@@ -11,3 +11,4 @@ dependencies:
   - pyqtgraph
   - qdarkstyle
   - pytest  # for testing only
+  - pytest-qt

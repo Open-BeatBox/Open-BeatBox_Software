@@ -1,14 +1,10 @@
-"""
-This module provides a GUI application to control the BeatBox Arduino device.
+"""BeatBox multi-device GUI application.
+
+``MultiDeviceApp`` manages N ``BBDeviceWidget`` widgets in a card + detail layout.
+Single-device use is just ``--n-devices 1`` (the default).
 
 It allows users to connect to the device, control actuators and monitor sensors directly
-as well as run experiments using classes derived from `BaseExperimentManager` like
-`BeatBoxExperimentManagerS1` or `BeatBoxExperimentManagerS2`.
-
-The main window is composed of three panels:
-  * ``HardwarePanel``  — sensors, actuators, neopixels (stage-agnostic)
-  * ``StagePanel``     — experiment data display and stage controllers
-  * connection / experiment chrome — serial port, folder, start/stop
+as well as run experiments
 """
 
 import os
@@ -18,137 +14,62 @@ sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 import argparse
 import warnings
-from pathlib import Path
 import logging
+from pathlib import Path
 
 from configobj import ConfigObj
 
-from qtpy import QtCore
 from qtpy.QtCore import Qt
-from qtpy.QtWidgets import (
-    QMainWindow, QTextEdit, QComboBox, QPushButton,
-    QVBoxLayout, QWidget, QGroupBox, QHBoxLayout, QFormLayout,
-    QFileDialog, QMessageBox, QProgressDialog, QErrorMessage,
-    QDialog, QLineEdit, QApplication, QLabel, QStackedWidget,
-)
+from qtpy.QtWidgets import (QMainWindow, QWidget, QTextEdit, QLineEdit, QLabel, QStackedWidget,
+                            QVBoxLayout, QHBoxLayout, QGroupBox, QFormLayout,
+                            QDialog, QFileDialog, QMessageBox, QProgressDialog, QErrorMessage, QApplication)
 import qdarkstyle
 
-from beatbox.gui.bb_logging import qt_handler, logger
-from beatbox.experiment_managers.base import SubjectInfo
-from beatbox.experiment_managers.s1 import BeatBoxExperimentManagerS1
-from beatbox.experiment_managers.s2 import BeatBoxExperimentManagerS2
-from beatbox.experiment_managers.s3 import BeatBoxExperimentManagerS3
-from beatbox.experiment_managers.s3_1 import BeatBoxExperimentManagerS3_1
-from beatbox.experiment_managers.s4 import BeatBoxExperimentManagerS4
-from beatbox.gui.qt_utils import (labeled_spinbox, push_button, swap_button, combo_box,
-                                  selectable_label, safe_delete, add_form_fields, FieldSpec)
-from beatbox.comm.serial_com import get_platform_serial_ports, BeatBoxCommunicator, BeatBoxMessage, HandshakeWorker
-from beatbox.gui.hardware_panel import HardwarePanel
-from beatbox.gui.stage_panels import create_stage_panel
+from beatbox.gui.bb_logging import qt_handler
+from beatbox.experiment_managers.registry import _STAGE_MANAGER_CLASSES
+from beatbox.experiment_managers.types import SubjectInfo
+from beatbox.gui.bb_device_widget import BBDeviceWidget
+from beatbox.gui.device_summary_card import DeviceSummaryCard
+from beatbox.gui.broadcast_controller import BroadcastController
+from beatbox.gui.qt_utils import push_button, combo_box
+from beatbox.comm.serial_com import BeatBoxMessage
 
 
-SERIAL_TIMEOUT = 2
-BAUD_RATE = 115200
+class MultiDeviceApp(QMainWindow):
+    """Main window: cards row + detail panel + shared log + broadcast bar."""
 
-
-_STAGE_MANAGER_CLASSES: dict[str, type] = {
-    'S1':   BeatBoxExperimentManagerS1,
-    'S2':   BeatBoxExperimentManagerS2,
-    'S3':   BeatBoxExperimentManagerS3,
-    'S3.1': BeatBoxExperimentManagerS3_1,
-    'S4':   BeatBoxExperimentManagerS4,
-}
-
-# next_label is None for the terminal stage
-_STAGE_SEQUENCE: dict[str, str | None] = {
-    'S1':   'S2',
-    'S2':   'S3',
-    'S3':   'S3.1',
-    'S3.1': 'S4',
-    'S4':   None,
-}
-
-
-def transition_stage(current_stage: str, experiment_folder, communicator, main_window, subject_info):
-    """Create the next stage's manager, or return None if terminal.
-
-    Returns (next_label, manager) or None.
-    """
-    if current_stage not in _STAGE_SEQUENCE:
-        raise ValueError(f'Unknown stage "{current_stage}"')
-
-    next_label = _STAGE_SEQUENCE[current_stage]
-    if next_label is None:
-        return None
-
-    manager = _STAGE_MANAGER_CLASSES[next_label](experiment_folder, communicator,
-                                                 main_window=main_window, subject_info=subject_info)
-    return next_label, manager
-
-
-
-class ArduinoControlApp(QMainWindow):
-
-    def __init__(self, pins_config_file, experiment_folder='', with_neopixels=False,
-                 n_trials=20, inter_trial_interval=10000, stage='S1',
-                 transition=False, subject_info=None):
+    def __init__(self, device_configs: list[dict]):
         super().__init__()
-        self.subject_info = subject_info
-        self.enable_transitions = transition
+        self.setWindowTitle('BeatBox Controller')
 
         # Log area — created early so error handlers can use it
         self.log_text = QTextEdit('Log:')
         self.log_text.setReadOnly(True)
+        qt_handler.logSignal.connect(self._append_log)
 
-        # Communicator
-        self.communicator = BeatBoxCommunicator(baud_rate=BAUD_RATE, serial_timeout=SERIAL_TIMEOUT)
-        self.communicator.connected.connect(self._on_connected)
-        self.communicator.handshakeCompleted.connect(self._on_handshake)
-        self.communicator.errorOccurred.connect(self._on_error)
+        # Build devices
+        self._devices: list[BBDeviceWidget] = []
+        for i, cfg in enumerate(device_configs):
+            cfg.setdefault('name', f'Box {i + 1}')
+            self._devices.append(BBDeviceWidget(**cfg, parent=self))
 
-        # Experiment manager
-        if stage in _STAGE_MANAGER_CLASSES:
-            self._experiment_manager = _STAGE_MANAGER_CLASSES[stage](experiment_folder, self.communicator,
-                                                                    main_window=self, subject_info=subject_info)
-        else:
-            raise ValueError(f'Unknown stage "{stage}"')
+        self._cards: list[DeviceSummaryCard] = []
+        self._broadcast = BroadcastController(parent=self)
+        for unit in self._devices:
+            self._broadcast.register(unit)
 
-        # Panels
-        self._hw_panel = HardwarePanel(self._experiment_manager, with_neopixels=with_neopixels)
-        self._stage_stack = QStackedWidget()
+        self._current_detail: BBDeviceWidget | None = None
 
-        # Build UI shell, then populate stage panel and wire signals
-        self.setWindowTitle('Beatbox Controller')
         self._build_ui()
-        self._set_stage_panel(stage)
-        self._connect_manager_signals()
-        self.experiment_manager.link_widgets()
 
-        # Connect global log signals to our UI append function.
-        qt_handler.logSignal.connect(self.append_log)
+        # Show first device by default
+        if self._devices:
+            self._show_unit(self._devices[0])
 
-        # Handshake thread
-        self._handshake_q_thread = QtCore.QThread(self)  # stop with the window
-        self._handshake_worker = HandshakeWorker(self.communicator)
+        for unit in self._devices:
+            unit.communicator.errorOccurred.connect(self._on_error)
 
-        self._connect_progress = None
-
-        # State
-        self._serial_connected = False
-        self._folder_selected = False
-
-    @property
-    def experiment_manager(self):
-        return self._experiment_manager
-
-    @experiment_manager.setter
-    def experiment_manager(self, manager):
-        self._disconnect_manager_signals()
-        old = self._experiment_manager
-        self._experiment_manager = manager
-        self._hw_panel.set_manager(manager)
-        if old is not None:
-            old.deleteLater()
+    # ─── UI construction ──────────────────────────────────────────
 
     def _build_ui(self):
         """Compose the main window from panels — no stage-specific logic."""
@@ -156,281 +77,91 @@ class ArduinoControlApp(QMainWindow):
         self.setCentralWidget(central_widget)
         main_layout = QVBoxLayout(central_widget)
 
-        main_layout.addWidget(self._build_connection_group())
-        main_layout.addWidget(self._build_experiment_group())
-        main_layout.addWidget(self._stage_stack)
-        main_layout.addWidget(self._hw_panel)
-        main_layout.addWidget(self._build_info_row())
+        # Only show broadcast bar for multi-device
+        if len(self._devices) > 1:
+            main_layout.addWidget(self._build_broadcast_bar())
+
+        main_layout.addLayout(self._build_cards_row())
+
+        self._detail_stack = QStackedWidget()
+        for unit in self._devices:
+            self._detail_stack.addWidget(unit)
+        main_layout.addWidget(self._detail_stack)
+
         main_layout.addWidget(self.log_text)
 
-    def _build_connection_group(self) -> QGroupBox:
-        connection_group = QGroupBox('Serial Connection')
-        connection_layout = QHBoxLayout(connection_group)
-
-        self.port_combobox = QComboBox(self)
-        self.port_combobox.setMinimumWidth(100)
-        self.refresh_ports()
-
-        self.connect_button = QPushButton('Connect')
-        self.connect_button.clicked.connect(self.connect_serial)
-        self.refresh_ports_btn = push_button('Refresh', on_clicked=self.refresh_ports)
-
-        connection_layout.addWidget(QLabel('Port:'))
-        connection_layout.addWidget(self.port_combobox)
-        connection_layout.addWidget(self.refresh_ports_btn)
-        connection_layout.addWidget(self.connect_button)
-        return connection_group
-
-    def _build_experiment_group(self) -> QGroupBox:
-        group = QGroupBox('Experiment Setup')
-        group.setObjectName('experiment_group')
+    def _build_broadcast_bar(self) -> QGroupBox:
+        group = QGroupBox('Broadcast Controls')
         lay = QHBoxLayout(group)
-
-        self.experiment_button = push_button('Select Folder', on_clicked=self.select_experiment_folder)
-        lay.addWidget(self.experiment_button)
-
-        # Controls for n_trials and inter_trial_interval
-        lbl, self.n_trials_spinbox = labeled_spinbox('n_trials:', lo=1, hi=9999,
-                                                     value=self.experiment_manager.n_trials)
-        lay.addWidget(lbl)
-        lay.addWidget(self.n_trials_spinbox)
-
-        lbl, self.inter_trial_spinbox = labeled_spinbox('Inter trial (ms):', lo=1, hi=999_999,
-                                                        value=self.experiment_manager.inter_trial_interval)
-        lay.addWidget(lbl)
-        lay.addWidget(self.inter_trial_spinbox)
-
-        self.experiment_state_btn = push_button('Start Experiment', on_clicked=self.start_experiment, enabled=False)
-        lay.addWidget(self.experiment_state_btn)
+        lay.addWidget(push_button('Select All', on_clicked=self._select_all))
+        lay.addWidget(push_button('Select None', on_clicked=self._select_none))
+        lay.addWidget(push_button('▶ Start Selected', on_clicked=self._broadcast.broadcast_start))
+        lay.addWidget(push_button('■ Stop Selected', on_clicked=self._broadcast.broadcast_stop))
+        lay.addWidget(push_button('📁 Set Folder for Selected', on_clicked=self._broadcast_select_folder))
         return group
 
-    def _build_info_row(self) -> QWidget:
-        row = QWidget()
-        lay = QHBoxLayout(row)
-        lay.setContentsMargins(0, 0, 0, 0)
-        # Left: Animal info
-        lay.addWidget(self._build_animal_info())
-
-        # Right: Stage and phase info
-        stage_phase_group = QGroupBox('Stage/Phase Info')
-        form = QFormLayout(stage_phase_group)
-        self.stage_label = selectable_label(str(self.experiment_manager.config.s_level))
-        self.phase_label = selectable_label()
-        form.addRow('Current Stage:', self.stage_label)
-        form.addRow('Current Phase:', self.phase_label)
-        lay.addWidget(stage_phase_group)
+    def _build_cards_row(self) -> QHBoxLayout:
+        row = QHBoxLayout()
+        for unit in self._devices:
+            card = DeviceSummaryCard(unit)
+            card.viewRequested.connect(self._show_unit)
+            card.broadcastToggled.connect(self._on_broadcast_toggled)
+            self._cards.append(card)
+            row.addWidget(card)
+        row.addStretch()
         return row
 
-    def _build_animal_info(self) -> QGroupBox:
-        """Create a group box displaying animal information."""
-        group = QGroupBox('Animal Information')
-        layout = QFormLayout(group)
-        info = self.subject_info or SubjectInfo()
-        add_form_fields(layout, self, [
-            FieldSpec('Animal name:', 'animal_name_label', info.subject_id),
-            FieldSpec('Weight (g):',  'weight_label',      str(info.weight)),
-            FieldSpec('Box:',         'box_label',          info.box),
-            FieldSpec('Sex:',         'sex_label',          info.sex),
-            FieldSpec('Light cycle:', 'light_cycle_label',  info.light_cycle),
-        ])
-        return group
+    # ─── Detail panel routing ─────────────────────────────────────
 
-    # ═══════════════════════════════════════════════════════════════════
-    #  STAGE PANEL MANAGEMENT
-    # ═══════════════════════════════════════════════════════════════════
-
-    def _set_stage_panel(self, stage_label: str):
-        """Replace the current stage panel in the stack."""
-        while self._stage_stack.count():
-            old = self._stage_stack.widget(0)
-            self._stage_stack.removeWidget(old)
-            safe_delete(old)
-        panel = create_stage_panel(stage_label, self.experiment_manager)
-        self._stage_stack.addWidget(panel)
-        self._stage_stack.setCurrentWidget(panel)
-
-    # ═══════════════════════════════════════════════════════════════════
-    #  SIGNAL WIRING
-    # ═══════════════════════════════════════════════════════════════════
-
-    def _connect_manager_signals(self):
-        """Wire experiment manager signals to panels and main window slots.
-
-        Stage-specific signal connections are handled inside each
-        ``StagePanel._connect_signals`` — this method only does
-        stage-agnostic wiring.
-        """
-        mgr = self.experiment_manager
-
-        # Hardware panel
-        mgr.sensorsStateChanged.connect(self._hw_panel.paint_sensors)
-        mgr.actuatorsStateChanged.connect(self._hw_panel.paint_actuators)
-        mgr.pelletDeliveryAlert.connect(self._hw_panel.show_pellet_alert)
-
-        # Hardware panel → manager
-        self._hw_panel.manualSetRequested.connect(mgr.request_manual_action_by_pins_and_rgb)
-
-        # Main window
-        mgr.stageEnded.connect(self.handle_stage_end)
-        mgr.phaseChanged.connect(self._update_phase_label)
-        mgr.stageChanged.connect(self._update_stage_label)
-
-    def _disconnect_manager_signals(self):
-        """Disconnect current manager before swapping."""
-        mgr = self.experiment_manager
-        for sig, slot in [
-            (mgr.sensorsStateChanged,  self._hw_panel.paint_sensors),
-            (mgr.actuatorsStateChanged,self._hw_panel.paint_actuators),
-            (mgr.pelletDeliveryAlert,  self._hw_panel.show_pellet_alert),
-            (mgr.stageEnded,           self.handle_stage_end),
-            (mgr.phaseChanged,         self._update_phase_label),
-            (mgr.stageChanged,         self._update_stage_label),
-        ]:
+    def _show_unit(self, unit: BBDeviceWidget):
+        # Disconnect previous detail panel from broadcast
+        if self._current_detail is not None:
             try:
-                sig.disconnect(slot)
+                self._current_detail.hw_panel.manualSetRequested.disconnect(self._broadcast.broadcast_manual_set)
             except (TypeError, RuntimeError):
                 pass
-        try:
-            self._hw_panel.manualSetRequested.disconnect(mgr.request_manual_action_by_pins_and_rgb)
-        except (TypeError, RuntimeError):
-            pass
 
-    # ═══════════════════════════════════════════════════════════════════
-    #  SERIAL CONNECTION
-    # ═══════════════════════════════════════════════════════════════════
+        self._detail_stack.setCurrentWidget(unit)
+        self._broadcast.set_viewed(unit)
+        self._current_detail = unit
 
-    def refresh_ports(self):
-        """
-        Scan for available serial ports and populate the port_combobox.
-        """
-        self.port_combobox.clear()
-        for port in get_platform_serial_ports():
-            self.port_combobox.addItem(port.device)
+        # Route this panel's manual actions through broadcast
+        unit.hw_panel.manualSetRequested.connect(self._broadcast.broadcast_manual_set)
 
-    def connect_serial(self):
-        """
-        Connect to the selected serial port and initiate a handshake with the BeatBox device.
-        The connection process is handled in a separate thread to avoid blocking the UI.
-        """
-        self.connect_button.setEnabled(False)
-        port_name = self.port_combobox.currentText()
-        if not port_name:
-            self.append_log('No serial port selected.', logging.WARNING)
-            self.connect_button.setEnabled(True)
-            return
+        # Highlight selected card
+        for i, d in enumerate(self._devices):
+            self._cards[i].set_selected(d is unit)
 
-        self._connect_progress = self._create_connection_progress()
-        self.communicator.connect_port(port_name)
+    # ─── Broadcast helpers ────────────────────────────────────────
 
-        # offload the handshake to a worker thread
-        self._handshake_worker.moveToThread(self._handshake_q_thread)
-        self._handshake_q_thread.started.connect(self._handshake_worker.run)
+    def _on_broadcast_toggled(self, unit: BBDeviceWidget, on: bool):
+        self._broadcast.set_broadcast_target(unit, on)
 
-        self._handshake_worker.finished.connect(self._on_handshake_done)
-        self._handshake_worker.finished.connect(self._handshake_q_thread.quit)
+    def _select_all(self):
+        self._broadcast.select_all()
+        for card in self._cards:
+            card.set_broadcast_target(True)
 
-        # Initiate handshake
-        self._handshake_q_thread.start()
+    def _select_none(self):
+        self._broadcast.select_none()
+        for card in self._cards:
+            card.set_broadcast_target(False)
 
-    @QtCore.Slot(bool)
-    def _on_handshake_done(self, ok: bool):
-        self._connect_progress.close()
-
-        if ok:            # connect btn stays disabled
-            QMessageBox.information(self, 'BeatBox', 'Connection established!')
-        else:
-            error_message = (f'Could not establish communication with port {self.port_combobox.currentText()}. '
-                             f'Please check the serial port and try again.')
-            QMessageBox.critical(self, 'BeatBox', error_message)
-            self.connect_button.setEnabled(True)
-
-    def _create_connection_progress(self):
-        dlg = QProgressDialog('Connecting to BeatBox device…', cancelButtonText=None,
-                              minimum=0, maximum=0, parent=self)
-        dlg.setWindowTitle('Connecting')
-        dlg.setWindowModality(Qt.ApplicationModal)
-        dlg.setMinimumDuration(0)  # show immediately
-        dlg.setAutoClose(False)
-        return dlg
-
-    def _on_connected(self):
-        self.append_log('Serial port connected.', logging.INFO)
-
-    def _on_handshake(self):
-        self.append_log('Handshake completed.', logging.INFO)
-        self._serial_connected = True
-        # Set screen to default state
-        self._update_experiment_state_btn()
-        self.experiment_manager.handshake_completed()
-
-    # ═══════════════════════════════════════════════════════════════════
-    #  EXPERIMENT LIFECYCLE
-    # ═══════════════════════════════════════════════════════════════════
-
-    def select_experiment_folder(self):
-        folder = QFileDialog.getExistingDirectory(self, 'Select Experiment Folder')
+    def _broadcast_select_folder(self):
+        folder = QFileDialog.getExistingDirectory(self, 'Set Experiment Folder for Selected Devices')
         if folder:
-            self.experiment_manager.set_experiment_folder(folder)
-            self._folder_selected = True
-            self._update_experiment_state_btn()
-
-    def start_experiment(self):
-        self.experiment_manager.start_experiment()
-        swap_button(self.experiment_state_btn, 'Stop Experiment', self.start_experiment, self.stop_experiment)
-
-    def stop_experiment(self):
-        self.experiment_manager.end_experiment()
-        swap_button(self.experiment_state_btn, 'Start Experiment', self.stop_experiment, self.start_experiment)
-        self._update_experiment_state_btn()
-        logger.debug('Stopping experiment.')
-
-    def handle_stage_end(self, current_stage: str):
-        """Transition to the next stage or show completion message."""
-        if not self.enable_transitions:
-            return
-
-        result = transition_stage(current_stage, self.experiment_manager.experiment_folder, self.communicator,
-                                  main_window=self, subject_info=self.subject_info)
-
-        if result is None:  # terminal stage: stop
-            QMessageBox.information(self, f'Stage {current_stage} complete', 'Experiment complete.')
-            return
-
-        next_label, manager = result
-        self.append_log(f'Stage {current_stage} complete. Moving to "{next_label}".', logging.INFO)
-
-        # Property setter handles disconnect, deleteLater, hw_panel update
-        self.experiment_manager = manager
-
-        # Swap panel and rewire
-        self._set_stage_panel(next_label)
-        self._connect_manager_signals()
-        self._hw_panel.clear_pellet_alert()
-
-        # Sync base spinboxes
-        self.n_trials_spinbox.setValue(self.experiment_manager.config.n_trials)
-        self.inter_trial_spinbox.setValue(self.experiment_manager.config.inter_trial_interval)
-
-        self.experiment_manager.link_widgets()
-        self.experiment_manager.start_experiment()
-
-    def _update_experiment_state_btn(self):
-        self.experiment_state_btn.setEnabled(self._serial_connected and self._folder_selected)
-
-    def _update_phase_label(self, phase_name: str):
-        self.phase_label.setText(phase_name)
-
-    def _update_stage_label(self, stage_name: str):
-        self.stage_label.setText(stage_name)
+            self._broadcast.broadcast_set_folder(folder)
 
     def _on_error(self, msg: BeatBoxMessage | str):
         err = msg.payload if isinstance(msg, BeatBoxMessage) else msg
-        self.append_log(f'Error: {err}', logging.ERROR)
+        self._append_log(f'Error: {err}', logging.ERROR)
         dialog = QErrorMessage()
         dialog.showMessage(err)
         dialog.exec_()
 
-    def append_log(self, message: str, level: int = logging.DEBUG):
+    # ─── Logging ──────────────────────────────────────────────────
+
+    def _append_log(self, message: str, level: int = logging.DEBUG):
         colors = {logging.INFO: 'yellow', logging.WARNING: 'orange', logging.ERROR: 'red'}
         color = colors.get(level, 'white')
         formatted = f'<font color="{color}">{message}</font>'
@@ -441,10 +172,8 @@ class ArduinoControlApp(QMainWindow):
         Triggers when window is closed.
         Ensure the communicator shuts down cleanly.
         """
-        self._serial_connected = False
-        self._folder_selected = False
-        self.experiment_state_btn.setEnabled(False)
-        self.communicator.close()
+        for unit in self._devices:
+            unit.close()
         super().closeEvent(event)
 
 
@@ -476,7 +205,7 @@ class StageSelectDialog(QDialog):
         layout.addLayout(form)
         layout.addWidget(push_button('OK', on_clicked=self.accept))
 
-    def get_subject_info(self):
+    def get_subject_info(self) -> SubjectInfo:
         return SubjectInfo(
             subject_id=self.animal_name(),
             weight=self.weight(),
@@ -485,7 +214,7 @@ class StageSelectDialog(QDialog):
             light_cycle=self.light_cycle()
         )
 
-    def selected_stage(self):
+    def selected_stage(self) -> str:
         return self.combo.currentText()
     def animal_name(self):
         return self.animal_name_edit.text()
@@ -500,9 +229,7 @@ class StageSelectDialog(QDialog):
 
 
 def main():
-
-    parser = argparse.ArgumentParser('BeatBox Arduino Control App',
-                                     description='This app allows you to control the BeatBox from a python GUI.')
+    parser = argparse.ArgumentParser('BeatBox Controller', description='Control one or more BeatBox devices from a Python GUI.')
     parser.add_argument('--with-neopixels', action='store_true', default=False,
                         help='Include neopixel controls in the GUI.')
     parser.add_argument('--n-trials', type=int, default=20, help='Number of trials to run.')
@@ -513,6 +240,8 @@ def main():
                         help='Path to the pins configuration file. You should not have to modify this.')
     parser.add_argument('--from-config-file', type=str, default='',
                         help='Path to a configuration file to load settings from.')
+    parser.add_argument('--n-devices', type=int, default=1,
+                        help='Number of device units (for multi-box use).')
     args = parser.parse_args()
 
     app = QApplication(sys.argv)
@@ -535,7 +264,8 @@ def main():
 
     kwargs = dict(stage=selected_stage, transition=should_transition, subject_info=dialog.get_subject_info(),
                   with_neopixels=args.with_neopixels, n_trials=args.n_trials,
-                  inter_trial_interval=args.inter_trial_interval, experiment_folder='')
+                  inter_trial_interval=args.inter_trial_interval, experiment_folder='',
+                  pins_config_file=str(config_path))
 
     # Now instantiate ArduinoControlApp with the correct stage
     if args.from_config_file and os.path.exists(args.from_config_file):
@@ -543,9 +273,11 @@ def main():
         kwargs.update(experiment_folder=str(Path(args.from_config_file).parent), with_neopixels=params['with_neopixels'],
                       n_trials=params['n_trials'], inter_trial_interval=params['inter_trial_interval_ms'])
 
-    window = ArduinoControlApp(str(config_path), **kwargs)
+    device_configs = [kwargs.copy() for _ in range(args.n_devices)]
+    for i, cfg in enumerate(device_configs):
+        cfg['name'] = f'Box {i + 1}'
 
-    window.refresh_ports()
+    window = MultiDeviceApp(device_configs)
     window.show()
     sys.exit(app.exec_())
 

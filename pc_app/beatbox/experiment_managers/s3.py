@@ -5,7 +5,8 @@ from pathlib import Path
 import logging
 
 from beatbox.experiment_managers.s2 import BeatBoxExperimentManagerS2, S2Config
-from beatbox.experiment_managers.base import SubjectInfo, BaseExperimentManager
+from beatbox.experiment_managers.base import BaseExperimentManager
+from beatbox.experiment_managers.types import SubjectInfo
 from beatbox.comm.pin_config import PinConfig
 
 

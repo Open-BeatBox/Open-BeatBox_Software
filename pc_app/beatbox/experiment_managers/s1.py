@@ -6,7 +6,8 @@ from typing import Dict, Any, Optional
 
 from qtpy import QtWidgets
 
-from beatbox.experiment_managers.base import BaseExperimentManager, Phase, PhaseSpec, Edge, SConfig, SubjectInfo
+from beatbox.experiment_managers.base import BaseExperimentManager, SConfig
+from beatbox.experiment_managers.types import SubjectInfo, Edge, Phase, PhaseSpec
 from beatbox.comm.pin_config import PinConfig
 
 

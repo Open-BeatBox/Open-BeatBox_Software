@@ -5,7 +5,7 @@ from pathlib import Path
 
 from beatbox.experiment_managers.s2 import S2Config
 from beatbox.experiment_managers.s3 import BeatBoxExperimentManagerS3
-from beatbox.experiment_managers.base import SubjectInfo
+from beatbox.experiment_managers.types import SubjectInfo
 from beatbox.experiment_managers.patterns import PATTERN_ID, get_pin_names_from_pattern
 from beatbox.comm.pin_config import PinConfig
 
