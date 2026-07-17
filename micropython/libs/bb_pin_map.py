@@ -25,6 +25,19 @@ class NosepokePins(PinMap):
 class ScreenPins(PinMap):
     """Pin mapping for screen module."""
     IR_BEAM = 20
+    LCD_RD = 12
+    LCD_WR = 11
+    LCD_RS = 10
+    LCD_CS = 9
+    LCD_RST = 13
+    LCD_D0 = 0
+    LCD_D1 = 1
+    LCD_D2 = 2
+    LCD_D3 = 3
+    LCD_D4 = 4
+    LCD_D5 = 5
+    LCD_D6 = 6
+    LCD_D7 = 7
 
 class FeederPins(PinMap):
     """Pin mapping for feeder module."""
