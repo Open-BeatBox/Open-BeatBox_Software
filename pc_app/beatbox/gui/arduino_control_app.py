@@ -57,6 +57,9 @@ class MultiDeviceApp(QMainWindow):
         self._broadcast = BroadcastController(parent=self)
         for unit in self._devices:
             self._broadcast.register(unit)
+            unit.portClaimed.connect(self._refresh_all_ports)
+            unit.communicator.errorOccurred.connect(self._on_error)
+
 
         self._current_detail: BBDeviceWidget | None = None
 
@@ -66,8 +69,12 @@ class MultiDeviceApp(QMainWindow):
         if self._devices:
             self._show_unit(self._devices[0])
 
+    def _refresh_all_ports(self):
+        """Refresh port lists on all devices, excluding already-claimed ports."""
+        claimed = {d.claimed_port for d in self._devices if d.claimed_port}
         for unit in self._devices:
-            unit.communicator.errorOccurred.connect(self._on_error)
+            if not unit.claimed_port:  # only refresh disconnected devices
+                unit.refresh_ports(exclude=claimed)
 
     # ─── UI construction ──────────────────────────────────────────
 

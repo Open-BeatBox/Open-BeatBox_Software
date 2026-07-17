@@ -53,6 +53,7 @@ class BBDeviceWidget(QWidget):
         Injectable for testing. If None, a real one is created.
     """
     connectionStatusChanged = Signal(bool)
+    portClaimed             = Signal()
     trialDataChanged        = Signal(dict)
     performanceChanged      = Signal(object)
     phaseChanged            = Signal(str)
@@ -112,6 +113,11 @@ class BBDeviceWidget(QWidget):
         self._hw_panel.set_manager(manager)
         if old is not None:
             old.deleteLater()
+
+    @property
+    def claimed_port(self) -> str:
+        """Return the port this device is connected to, or '' if not connected."""
+        return self.port if self._serial_connected else ''
 
     @property
     def hw_panel(self) -> HardwarePanel:
@@ -262,11 +268,13 @@ class BBDeviceWidget(QWidget):
 
     # ─── Serial connection ────────────────────────────────────────
 
-    def refresh_ports(self):
-        """Scan for available serial ports and populate the port_combobox."""
+    def refresh_ports(self, exclude: set[str] = None):
+        """Scan for available serial ports, excluding already-claimed ones."""
+        exclude = exclude or set()
         self.port_combobox.clear()
         for p in get_platform_serial_ports():
-            self.port_combobox.addItem(p.device)
+            if p.device not in exclude:
+                self.port_combobox.addItem(p.device)
 
     def connect_serial(self):
         """
@@ -318,10 +326,12 @@ class BBDeviceWidget(QWidget):
         if ok:
             self._serial_connected = True
             self._update_experiment_state_btn()
+            self.portClaimed.emit()  # tell the app to refresh other devices
+            logger.info(f'[{self.name}] Handshake successful on "{self.port}".')
         else:
             self.connect_button.setEnabled(True)
+            logger.warning(f'[{self.name}] Handshake failed on "{self.port}".')
         self.connectionStatusChanged.emit(ok)
-        logger.info(f'[{self.name}] Handshake {"successful" if ok else "failed"} on "{self.port}".')
 
     def _on_error(self, msg):
         logger.error(f'[{self.name}] {msg}')
