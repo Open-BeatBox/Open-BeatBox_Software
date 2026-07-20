@@ -304,8 +304,8 @@ class BBDeviceWidget(QWidget):
 
 
     def _create_connection_progress(self) -> QProgressDialog:
-        dlg = QProgressDialog('Connecting to BeatBox device…', cancelButtonText=None,
-                              minimum=0, maximum=0, parent=self)
+        dlg = QProgressDialog('Connecting to BeatBox device…', None,
+                              0, 0, self)
         dlg.setWindowTitle('Connecting')
         dlg.setWindowModality(Qt.ApplicationModal)
         dlg.setMinimumDuration(0)  # show immediately
