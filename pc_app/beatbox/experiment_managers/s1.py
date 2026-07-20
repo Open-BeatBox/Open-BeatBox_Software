@@ -35,7 +35,7 @@ class BeatBoxExperimentManagerS1(BaseExperimentManager):
                  main_window=None, actuator_pins_cfg: PinConfig = None,
                  subject_info: SubjectInfo = None):
         super().__init__(experiment_folder, communicator, main_window, actuator_pins_cfg, subject_info=subject_info)
-        self.config = S1Config(Path(__file__).parent)
+        self.config = S1Config(Path(__file__).parent.parent)
         self.config.load()
 
         self._reward_left = 0

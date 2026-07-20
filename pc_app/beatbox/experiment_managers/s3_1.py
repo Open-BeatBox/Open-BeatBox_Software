@@ -22,7 +22,7 @@ class BeatBoxExperimentManagerS3_1(BeatBoxExperimentManagerS3):
                  subject_info: SubjectInfo = None):
         super().__init__(experiment_folder, communicator, main_window, actuator_pins_cfg, subject_info=subject_info)
         # Reuse S2/S3 config schema but bind runtime values to the S3.1 section.
-        self.config = S2Config(Path(__file__).parent)
+        self.config = S2Config(Path(__file__).parent.parent)
         self.config.s_level = 'S3.1'
         self.config.load()
         n_trials = int(self.config.n_trials)

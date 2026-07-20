@@ -122,7 +122,7 @@ class S2Panel(StagePanel):
         lay = QHBoxLayout(group)
 
         lbl, self.error_flash_spinbox = labeled_spinbox('Blink duration (ms):', lo=1, hi=999_999,
-                                                        value=self._mgr.error_flash_ms)
+                                                        value=self._mgr.config.error_flash_ms)
         lay.addWidget(lbl)
         lay.addWidget(self.error_flash_spinbox)
         lbl, self.learning_threshold_spinbox = labeled_double_spinbox('Learning threshold:',
@@ -154,7 +154,7 @@ class S2Panel(StagePanel):
         self.overall_value_label.setText(f'{val:.2f}')
 
     def update_params_from_manager(self):
-        self.error_flash_spinbox.setValue(self._mgr.error_flash_ms)
+        self.error_flash_spinbox.setValue(self._mgr.config.error_flash_ms)
         self.learning_threshold_spinbox.setValue(self._mgr.config.learning_threshold)
 
 

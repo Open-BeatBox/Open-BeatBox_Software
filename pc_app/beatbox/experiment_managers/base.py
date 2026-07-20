@@ -39,7 +39,7 @@ from beatbox.experiment_managers.types import ANY_PIN, SubjectInfo, Edge, Phase
 class SConfig:
     s_level: str = 'S0'
 
-    def __init__(self, folder=Path(__file__).parent):
+    def __init__(self, folder=Path(__file__).parent.parent):
         self.folder = folder
         self.attributes: List[str] = self._collect_attributes()
         self._config: Optional[ConfigObj] = None
@@ -80,7 +80,10 @@ class SConfig:
 
     @property
     def cfg_path(self) -> Path:
-        return Path(self.folder) / 'config' / 'experiment.cfg'
+        cfg_path = Path(self.folder) / 'config' / 'experiment.cfg'
+        if cfg_path.exists():
+            return cfg_path
+        return Path(__file__).parent.parent / 'config' / 'experiment.cfg'
 
     @property
     def _spec_path(self) -> Path:

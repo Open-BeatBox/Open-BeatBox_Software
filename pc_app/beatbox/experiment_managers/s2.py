@@ -67,7 +67,7 @@ class BeatBoxExperimentManagerS2(BeatBoxExperimentManagerS1):
         self.left_touches = 0
         self.right_touches = 0
         # Store only the last N responses, where N = n_trials from config
-        self.config = S2Config(Path(__file__).parent)
+        self.config = S2Config(Path(__file__).parent.parent)
         self.config.load()
         n_trials = int(self.config.n_trials)
         self.left_responses = deque(maxlen=n_trials)  # values: 'valid', 'invalid', 'incorrect'
@@ -490,9 +490,9 @@ class BeatBoxExperimentManagerS2(BeatBoxExperimentManagerS1):
             overall_performance=self.get_overall_performance(),
             left_performance=self.get_left_performance(),
             right_performance=self.get_right_performance(),
-            show_stim_ts=self._stimulus_show_ts,
-            screen_touch_ts=self._screen_touch_ts,
-            reward_collect_ts=self._pellet_retrieval_ts
+            show_stim_ts_ms=self._stimulus_show_ts,
+            screen_touch_ts_ms=self._screen_touch_ts,
+            reward_collect_ts_ms=self._pellet_retrieval_ts
         )
         # Reset timestamps for next trial
         self._stimulus_show_ts = None

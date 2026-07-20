@@ -41,7 +41,7 @@ class BeatBoxExperimentManagerS4(BeatBoxExperimentManagerS3):
                  subject_info: SubjectInfo = None):
         super().__init__(experiment_folder, communicator, main_window, actuator_pins_cfg, subject_info=subject_info)
         # Override config to use S2Config, but load S4-specific values from experiment.cfg
-        self.config = S4Config(Path(__file__).parent)
+        self.config = S4Config(Path(__file__).parent.parent)
         self.config.s_level = 'S4'  # For experiment.cfg section, but config spec is S4
         self.config.load()
         n_trials = int(self.config.n_trials)

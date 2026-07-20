@@ -22,7 +22,7 @@ class BeatBoxExperimentManagerS3(BeatBoxExperimentManagerS2):
                  subject_info: SubjectInfo = None):
         super().__init__(experiment_folder, communicator, main_window, actuator_pins_cfg, subject_info=subject_info)
         # Override config to use S2Config, but load S3-specific values from experiment.cfg
-        self.config = S2Config(Path(__file__).parent)
+        self.config = S2Config(Path(__file__).parent.parent)
         self.config.s_level = 'S3'  # For experiment.cfg section, but config spec is still S2
         self.config.load()
         n_trials = int(self.config.n_trials)
