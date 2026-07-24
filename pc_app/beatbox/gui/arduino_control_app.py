@@ -32,7 +32,7 @@ from beatbox.gui.bb_device_widget import BBDeviceWidget
 from beatbox.gui.device_summary_card import DeviceSummaryCard
 from beatbox.gui.broadcast_controller import BroadcastController
 from beatbox.gui.qt_utils import push_button, combo_box
-from beatbox.comm.serial_com import BeatBoxMessage
+from beatbox.comm.beatbox_protocol import BeatBoxMessage
 
 
 class MultiDeviceApp(QMainWindow):
