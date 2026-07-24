@@ -3,7 +3,7 @@ import pty
 import time
 import threading
 
-from beatbox.comm.beatbox_protocol import BeatBoxMessage
+from beatbox_protocol import BeatBoxMessage
 
 
 class MockArduino:

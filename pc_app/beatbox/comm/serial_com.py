@@ -9,7 +9,7 @@ from PyQt5 import QtCore
 from PyQt5.QtCore import pyqtSignal
 from serial.tools import list_ports
 
-from beatbox.comm.beatbox_protocol import BeatBoxMessage
+from beatbox_protocol import BeatBoxMessage
 from beatbox.gui.bb_logging import logger  # shared logger
 
 IN_TEST = 'pytest' in globals()
