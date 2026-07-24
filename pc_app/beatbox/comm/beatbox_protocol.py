@@ -28,19 +28,7 @@ except ImportError:
 
 class BeatBoxMessage:
     """
-    Class to handle encoding and decoding of messages to/from the BeatBox.
-    The message format is as follows:
-    <command>:<data type char><sequence><payload><crc8>\n
-    where:
-    - command is a string identifying the command (e.g. 'set', 'ack', 'ready')
-    - sequence is a byte indicating the sequence number of the message
-    - payload is a string of bytes representing the data
-    - crc is a byte representing the CRC-8 checksum of the message
-
-    The message can be encoded in different formats (e.g. hexadecimal, binary, octal, decimal).
-    The format is specified using a format string, e.g. '{:02x}' for hexadecimal passed to
-    the constructor.
-    The default format is hexadecimal with 2 digits per byte.
+    Class for encoding and decoding BeatBox serial messages.
 
     .. NOTE::
         This class is intentionally kept free of type annotations using
@@ -82,7 +70,7 @@ class BeatBoxMessage:
         self.command, self.sequence, self.payload, self.crc = self._parse_message()
 
     @staticmethod
-    def from_bytes(data: bytes, fmt = None):
+    def from_bytes(data: bytes, fmt = None) -> 'BeatBoxMessage':
         """Create from a bytes object (decodes to str first)."""
         return BeatBoxMessage(data.decode(), fmt)
 
@@ -136,7 +124,7 @@ class BeatBoxMessage:
         return int(x, format_base)
 
     def parse_format(self):
-        command, message_body = self.message.split(':', maxsplit=1)
+        command, message_body = self.message.split(':', 1)
         if not message_body:
             raise ValueError('Invalid message format: no payload found.')
         else:
@@ -225,7 +213,7 @@ class BeatBoxMessage:
             return int(self.format[-3])
 
     def _parse_message(self):
-        command, message_body = self.message.split(':', maxsplit=1)
+        command, message_body = self.message.split(':', 1)
 
         if not message_body:
             return command, None, '', None
@@ -287,7 +275,7 @@ class BeatBoxMessage:
         if ':' not in msg:
             return False
 
-        command, message_body = self.message.split(':', maxsplit=1)
+        command, message_body = self.message.split(':', 1)
         format_char = message_body[0]
         message_body = message_body[1:]
         if command in self.handshake_commands or format_char == 'r':  # Those don't have a seq and CRC
@@ -310,7 +298,7 @@ class BeatBoxMessage:
         if ':' not in self.message:
             return 'No command separator found.'
 
-        command, message_body = self.message.split(':', maxsplit=1)
+        command, message_body = self.message.split(':', 1)
         if command in self.handshake_commands:
             return 'Message OK.'
         format_char = message_body[0]
