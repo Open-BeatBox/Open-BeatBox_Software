@@ -1,22 +1,9 @@
 import logging
 from pathlib import Path
-from typing import Union, Dict, List
+from typing import Dict, List
 
 from configobj import ConfigObj
 
-
-# FIXME: check whether we always supply the message without the CRC
-def crc8(data: Union[str, bytes], polynomial: int = 0x07, init: int = 0) -> int:
-    """Calculate CRC-8 using polynomial 0x07."""
-    crc = init
-    for byte in data:  # FIXME: what if string?
-        crc ^= byte
-        for _ in range(8):
-            if crc & 0x80:
-                crc = ((crc << 1) ^ polynomial) & 0xFF
-            else:
-                crc = (crc << 1) & 0xFF
-    return crc
 
 class PinConfig:
     """
@@ -43,10 +30,10 @@ class PinConfig:
         """
         self.cfg_path = Path(cfg_path).expanduser()
         if not self.cfg_path.exists():
-            self.cfg_path = Path(__file__).parent / 'pins_config.cfg'
+            self.cfg_path = Path(__file__).parent.parent / 'config' / 'pins_config.cfg'
         self.pin_type = pin_type
         self.pin_names = []  # list of pin names in the order they are defined in the INI file
-        self._bit_index: Dict[str, int] = {}   # name → 0..15
+        self._bit_index: [str, int] = {}   # name → 0..15
         self._pin_number: Dict[str, int] = {}  # name → pin value (22..)
         self._current_states: Dict[str, int] = {}  # name → current state (0 or 1)
         self._default_states: Dict[str, int] = {}  # name → default state (0 or 1)
@@ -54,9 +41,9 @@ class PinConfig:
 
     def info(self) -> str:
         """Return a string with the pin configuration info."""
-        return f"PinConfig: {self.pin_type} pins loaded from {self.cfg_path}\n" + \
-               "\n".join(f"{name}: bit {self._bit_index[name]}, pin {self._pin_number[name]}"
-                         for name in self.pin_names)
+        pins_info = '\n'.join(f'{name}: bit {self._bit_index[name]}, pin {self._pin_number[name]}'
+                              for name in self.pin_names)
+        return f'PinConfig: {self.pin_type} pins loaded from {self.cfg_path}\n {pins_info}'
 
     def default_word(self) -> int:
         """Return the default 16-bit word as defined in the config file."""

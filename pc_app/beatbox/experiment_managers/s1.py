@@ -2,19 +2,21 @@ from __future__ import annotations
 
 import logging
 from pathlib import Path
-from typing import Dict, Any, List, Optional
+from typing import Dict, Any, Optional
 
-from configobj import ConfigObj
-from qtpy import QtWidgets, QtCore
+from qtpy import QtWidgets
 
-from beatbox.experiment_managers import BaseExperimentManager, Phase, PhaseSpec, Edge, SConfig, SubjectInfo
-from beatbox.utils import PinConfig
+from beatbox.experiment_managers.base import BaseExperimentManager, SConfig
+from beatbox.experiment_managers.types import SubjectInfo, Edge, Phase, PhaseSpec
+from beatbox.comm.pin_config import PinConfig
+
 
 class S1Config(SConfig):
     s_level = 'S1'
 
     n_trials: int
     inter_trial_interval: int
+
 
 class BeatBoxExperimentManagerS1(BaseExperimentManager):
     """
@@ -29,18 +31,24 @@ class BeatBoxExperimentManagerS1(BaseExperimentManager):
     """
     stage_number = 1
 
-    trialNumbersUpdated = QtCore.Signal(int, int)
-
     def __init__(self, experiment_folder, communicator,
                  main_window=None, actuator_pins_cfg: PinConfig = None,
                  subject_info: SubjectInfo = None):
         super().__init__(experiment_folder, communicator, main_window, actuator_pins_cfg, subject_info=subject_info)
-        self.config = S1Config(Path(__file__).parent)
+        self.config = S1Config(Path(__file__).parent.parent)
         self.config.load()
 
+        self._reward_left = 0
+
         # ----------------- phase table -----------------------------------
-        self._phase_table_initial = Phase.ITI
+        self._phase_table_initial = Phase.INIT
         self._phase_table = {
+            Phase.INIT: PhaseSpec(
+                on_enter=self._phase_init,
+                next_phase_default=Phase.ITI,
+                timeout_ms=0,
+                relevant_pins=None
+            ),
             Phase.ITI: PhaseSpec(
                 on_enter=self._phase_iti,
                 next_phase_default=Phase.DELIVER_PELLET,
@@ -56,7 +64,7 @@ class BeatBoxExperimentManagerS1(BaseExperimentManager):
             ),
 
             Phase.WAIT_PELLET: PhaseSpec(
-                on_enter= self._phase_wait_pellet,
+                on_enter=self._phase_wait_pellet,
                 routes={True: Phase.WAIT_PELLET_RETRIEVAL},
                 next_phase_default=Phase.DELIVER_PELLET,
                 timeout_ms=1000,
@@ -75,18 +83,30 @@ class BeatBoxExperimentManagerS1(BaseExperimentManager):
             Phase.DONE: PhaseSpec(
                 on_enter=self._phase_done,
                 routes=None,
-                decide= lambda instance: False,
+                decide=lambda instance: False,
                 relevant_pins=None
             )
         }
+
+    def _phase_init(self):
+        self.log(logging.INFO, f'Starting stage {self.config.s_level}.')
+        self.log(logging.INFO, f'Config used: \n{self.config.as_string()}')
+        if self.subject_info is not None:
+            self.log(logging.INFO, f'{self.subject_info.as_string()}')
+
 
     def _phase_iti(self):
         # TODO: check which one between defaults and screens off is more relevant
         # turn everything off
         # self.turn_off_screens()
-        self.set_outputs(default=True, flush=True) # Force defaults
+        self.set_outputs(default=True, flush=True)  # Force defaults
         self.waiting_for_pellet_retrieval = False
-        self.trialNumbersUpdated.emit(self.trial_no, self.trial_no)
+        self._emit_trial_data()
+
+    def _emit_trial_data(self):
+        self.trialDataUpdated.emit({
+            'current_trial': self.trial_no,
+        })
 
     def _phase_deliver_pellet(self):
         # don't deliver a reward if somehow there's already something there
@@ -96,11 +116,11 @@ class BeatBoxExperimentManagerS1(BaseExperimentManager):
         self.waiting_for_pellet_delivery = True
         self.pellet_delivery_loop_count += 1
         self.pelletDeliveryAlert.emit(self.pellet_delivery_loop_count)
-        self._deliver_reward() # also resets screen
+        self._deliver_reward()  # also resets screen
 
     # FIXME: see below
     def _phase_wait_pellet(self):
-        if not self.sensors_pins_config._current_states["nose_poke"]: # somehow there's already a pellet
+        if not self.sensors_pins_config._current_states["nose_poke"]:  # somehow there's already a pellet
             self._force_advance_to_wait_pellet()
             return
 
@@ -110,24 +130,27 @@ class BeatBoxExperimentManagerS1(BaseExperimentManager):
             return
         # Note: if timeout is not cancelled, it will be called for a phase that does not have a default route and crash
         if self._timer.isActive():
-            self._timer.stop() # No need to reset as timer.start(timeout_ms) will do it
+            self._timer.stop()  # No need to reset as timer.start(timeout_ms) will do it
         self._goto(Phase.WAIT_PELLET_RETRIEVAL)
 
     def _phase_wait_pellet_retrieval(self):
         self.waiting_for_pellet_retrieval = True
-        self.trial_no += 1
-        self.pellet_delivery_loop_count = 0 # reset for next trial
+        self.pellet_delivery_loop_count = 0  # reset for next trial
         self.pelletDeliveryAlert.emit(self.pellet_delivery_loop_count)
         payload = self.actuator_pins_cfg.mask()  # screens off
         self.emit_payload_ready(payload)
-        self.trialStarted.emit(self.trial_no)
 
-        self.log(logging.DEBUG, f'Starting trial {self.n_pellets_retrieved + 1} of {self.config.n_trials}')
+        if self.stage_number == 'S1':
+            self.log(logging.DEBUG, f'Starting trial {self.n_pellets_retrieved + 1} of {self.config.n_trials}')
+
+    def _advance_trial(self):
+        self.trial_no += 1
 
     def _phase_done(self):
         self.log(logging.INFO, f'{self.config.s_level} Experiment done.\n'
-                                f'Number of trials: {self.trial_no - 1}, number of pellets retrieved: {self.n_pellets_retrieved}')
+                               f'Number of trials: {self.trial_no}, number of pellets retrieved: {self.n_pellets_retrieved}')
         self.trial_no = 0
+        self._emit_trial_data()
         self.stageEnded.emit(self.config.s_level)
 
     def handle_pellet_delivered(self):
@@ -144,6 +167,9 @@ class BeatBoxExperimentManagerS1(BaseExperimentManager):
             return
         self.waiting_for_pellet_retrieval = False
         self.n_pellets_retrieved += 1
+        self._reward_left -= 1 if self._reward_left > 0 else 0
+        if self._reward_left == 0:
+            self._advance_trial()
         self.pelletRetrieved.emit()
 
     def get_experiment_status(self):
@@ -157,7 +183,6 @@ class BeatBoxExperimentManagerS1(BaseExperimentManager):
                 You can now move to next stage."""
             )
             return 'complete'
-
 
     def _dispatch_changed_pin(self, pin_name: str, edge: Edge = Edge.BOTH):
         # REFACTOR: we could use e.g. a dataclass to avoid string mismatches
@@ -180,7 +205,8 @@ class BeatBoxExperimentManagerS1(BaseExperimentManager):
 
     def log(self, level: int, message: str, state_bits: Optional[Dict[str, Any]] = None):
         BaseExperimentManager.log(self, level, message)
-        state_bits = state_bits if state_bits is not None else self._get_sensor_bits_from_state_value(self._last_state_value)
+        state_bits = state_bits if state_bits is not None else self._get_sensor_bits_from_state_value(
+            self._last_state_value)
         if self.csv_logger:
             self.csv_logger.log(
                 stage=self.stage_number,
