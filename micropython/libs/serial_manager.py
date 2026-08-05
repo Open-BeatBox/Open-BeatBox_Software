@@ -6,34 +6,44 @@ SerialManager using usb_cdc.data instead of console
 
 import asyncio
 import time
-import usb_cdc
+from message import BeatBoxMessage
 
 class SerialManager:
-    def __init__(self):
+    def __init__(self, serial=None):
+        """ Initialize serial manager.
+        """
         self.tx_queue = []
         self.command_callbacks = []
-        self.last_activity = time.monotonic()
-
+        self.last_activity = time.ticks_us()
+        self.serial = serial
         # Buffer for incoming data
         self.rx_buffer = ""
-        self.status = "OK" # OK or ERROR
+        self.status = "OK" # OK or STARTED or ERROR
 
-    def register_command_callback(self, callback):
+    def register_rx_callback(self, callback):
         """Register callback for received commands"""
         self.command_callbacks.append(callback)
 
     def send_message(self, message):
         """Queue message for transmission"""
-        self.tx_queue.append(str(message))
+        if self.status == "STARTED":
+            if isinstance(message, bytes):
+                self.tx_queue.append(message)
+            else:
+                self.tx_queue.append(str(message).encode())
 
     def _write_to_data_port(self, message):
-        """Write message (encoded as a string) to usb_cdc.data port"""
+        """Write message to serial port."""
         try:
-            if usb_cdc.data and usb_cdc.data.connected:
-                # Add newline if not present
-                if not message.endswith('\n'):
-                    message += '\n'
-                usb_cdc.data.write(message.encode('utf-8'))
+            if self.serial is not None:
+                if isinstance(message, str):
+                    message = message.encode()
+                # Add newline and carriage return if not present
+                if not message.endswith(b'\n'):
+                    if not message.endswith(b'\r'):
+                        message += b'\r'
+                    message += b'\n'
+                self.serial.write(message)
                 return True
         except Exception as e:
             # Use console for error reporting
@@ -41,29 +51,35 @@ class SerialManager:
         return False
 
     def _read_from_data_port(self):
-        """Read available data from usb_cdc.data port"""
+        """Read available data from serial port"""
         try:
-            if usb_cdc.data and usb_cdc.data.connected and usb_cdc.data.in_waiting > 0:
-                data = usb_cdc.data.read(usb_cdc.data.in_waiting)
-                if data:
-                    return data.decode('utf-8')
+            if self.serial and self.serial.any():
+                data = self.serial.read()
+                if isinstance(data, bytes):
+                    msg = data.decode()
+                    return msg
+                if data is None:
+                    return ""
+                return str(data)
         except Exception as e:
             print(f"Data port read error: {e}")
         return ""
 
     async def serial_handler_task(self):
-        """Serial task using usb_cdc.data port"""
-        print("Serial Handler started - using usb_cdc.data port")
-
+        """Serial task"""
+        print("Serial Handler started")
+        self.status = "STARTED"
         while True:
-            start_time = time.monotonic()
+            start_time = time.ticks_us()
 
             try:
                 # Send queued messages to data port
                 while self.tx_queue:
                     msg = self.tx_queue.pop(0)
-                    if self._write_to_data_port(msg):
-                        print(f"Sent via data port: '{msg.strip()}'")  # Debug on console
+                    if not self._write_to_data_port(msg):
+                        print('Error sending message')
+                    # else:
+                    #    print(f"Sent via data port: '{msg.strip()}'")  # Debug on console
                     await asyncio.sleep(0.01)
 
                 # Read incoming data from data port
@@ -71,7 +87,7 @@ class SerialManager:
 
                 if incoming_data:
                     self.rx_buffer += incoming_data
-                    self.last_activity = time.monotonic()
+                    self.last_activity = time.ticks_us()
 
                     # Process complete lines
                     while '\n' in self.rx_buffer:
@@ -79,7 +95,7 @@ class SerialManager:
                         line = line.strip()
 
                         if line:  # Non-empty line
-                            print(f"Received via data port: '{line}'")  # Debug on console
+                            print(f"Received via serial comm port:\n'{line}'")  # Debug on console
 
                             # Process command through callbacks
                             for callback in self.command_callbacks:
@@ -87,10 +103,10 @@ class SerialManager:
                                     callback(line)  # Pass string, not bytes
                                 except Exception as e:
                                     self.status = "ERROR"
-                                    print(f"Serial command callback error: {e}")
+                                    print(f"Error in command callback: {e}")
 
                 # Check processing time
-                processing_time = (time.monotonic() - start_time) * 1000
+                processing_time = (time.ticks_us() - start_time) / 1000
                 if processing_time > 40:
                     self.status = "ERROR"
                     print(f"Warning: Serial processing took {processing_time:.1f}ms")
@@ -99,7 +115,126 @@ class SerialManager:
                 print(f"Serial handler error: {e}")
 
             # Reset status if no recent errors, TODO: clear when acked and resolved instead
-            if time.monotonic() - self.last_activity > 1.0:
-                self.status = "OK"
+            if time.ticks_us() - self.last_activity > 1_000_000:
+                self.status = "STARTED"
 
             await asyncio.sleep(0.020)  # 20ms between checks
+
+class BeatBoxCommManager:
+    """
+    BeatBox Communication Manager
+    Handles serial communication and command processing.
+
+    This is manager works with the legacy app used for Beatbox V2 and emulates the way the serial communication
+    was handled in the original firmware.
+    """
+    def __init__(self, serial=None):
+        self.serial_manager = SerialManager(serial=serial)
+        self.serial_manager.register_rx_callback(self.process_message)
+        self.handshake_status = "ON_GOING"
+        self.status = ''
+        self.emulator = BeatBoxV2Emulator()
+
+    def process_message(self, message):
+        """Process incoming command from serial"""
+        if isinstance(message, bytes):
+            message = message.decode()
+        message = BeatBoxMessage(message.strip(), None)
+        if self.handshake_status == "DONE":
+            # Process normal commands
+            print(f"Processing command: {str(message)}")
+            self.serial_manager.send_message(f'ack:{message.command}')
+        else:
+            # Expect politeness, don't accept commands without handshake
+            self.process_handshake(message)
+
+    def process_handshake(self, message : BeatBoxMessage):
+        """ Process handshake message in the way of BeatBox V2"""
+        if message.command.startswith('ready'):
+            self.handshake_status = "RECEIVED"
+            print(f"Handshake received!")
+        else:
+            print(f"Received in handshake:\n{message}\n")
+
+    async def handshaker(self):
+        """Send handshake message to the app in the way of BeatBox V2"""
+        while self.handshake_status != "DONE":
+            if self.handshake_status == "RECEIVED":
+                self.handshake_status = "DONE"
+                print("Handshake completed")
+            self.serial_manager.send_message(f'ready:r00handshake(status={self.status})')
+            await asyncio.sleep(0.1)
+
+    def ack_command(self, command):
+        pin_bits = ''.join('1' if bit else '0' for bit in self.emulator.get_pin_states().values())
+        self.serial_manager.send_message(f"ack:{command}_from{pin_bits}")
+
+class BeatBoxV2Pins:
+    NosePoke = "nose_poke"
+    LeftResp = "left_response"
+    RightResp = "right_response"
+    LeftTunnelCrossing = "left_tunnel_crossing"
+    RightTunnelCrossing = "right_tunnel_crossing"
+    FeedAlert = "feed_alert"
+    Reward = "reward"
+    LeftPatternBit0 = "left_pattern_bit_0"
+    LeftPatternBit1 = "left_pattern_bit_1"
+    LeftPatternBit2 = "left_pattern_bit_2"
+    LeftPatternBit3 = "left_pattern_bit_3"
+    RightPatternBit0 = "right_pattern_bit_0"
+    RightPatternBit1 = "right_pattern_bit_1"
+    RightPatternBit2 = "right_pattern_bit_2"
+    RightPatternBit3 = "right_pattern_bit_3"
+    Light = "light"
+    RedLight = "red_light"
+
+class BeatBoxV2Emulator:
+    """
+    Emulator for BeatBox V2. Emulates IO states given the received status messages, and translates commands to
+    messages for the new BeatBox V3 firmware. This allows the legacy BeatBox V2 app to communicate with the new firmware.
+
+    The app for V2 worked by sending commands to the BeatBox which in turn would set TTL pins to HIGH or LOW to transmit
+    the command to concerned modules.
+    In return, any changes on inputs pin on the BeatBox V2 was forwarded as a 'state' message with the payload corresponding
+    to the pin states.
+
+    To emulate this behavior, we keep an object representing the pin states and update it based on the received messages.
+    When a command is received, we translate it to the appropriate message for the new firmware.
+    """
+    def __init__(self):
+        # Dictionaries to hold pin states
+        self.input_pin_states = {
+            BeatBoxV2Pins.NosePoke: 0,
+            BeatBoxV2Pins.LeftResp: 0,
+            BeatBoxV2Pins.RightResp: 0,
+            BeatBoxV2Pins.LeftTunnelCrossing: 0,
+            BeatBoxV2Pins.RightTunnelCrossing: 0,
+            BeatBoxV2Pins.FeedAlert: 0
+        }
+
+        self.output_pin_states = {
+            BeatBoxV2Pins.Reward: 0,
+            BeatBoxV2Pins.LeftPatternBit0: 0,
+            BeatBoxV2Pins.LeftPatternBit1: 0,
+            BeatBoxV2Pins.LeftPatternBit2: 0,
+            BeatBoxV2Pins.LeftPatternBit3: 0,
+            BeatBoxV2Pins.RightPatternBit0: 0,
+            BeatBoxV2Pins.RightPatternBit1: 0,
+            BeatBoxV2Pins.RightPatternBit2: 0,
+            BeatBoxV2Pins.RightPatternBit3: 0,
+            BeatBoxV2Pins.Light: 0,
+            BeatBoxV2Pins.RedLight: 0
+        }
+    def update_pin_state(self, pin_names):
+        """Update the state of pins given the pin names dictionary.
+        The dictionary should have pin names as keys and their desired state as values."""
+        for pin in pin_names:
+            self.input_pin_states[pin] = pin_names[pin]
+        # Here you would translate this to a message for the new firmware
+
+    def forward_cmd(self, cmd):
+        """Forward a command to the BeatBox V2"""
+        pass
+
+    def get_input_pin_states(self):
+        return self.input_pin_states

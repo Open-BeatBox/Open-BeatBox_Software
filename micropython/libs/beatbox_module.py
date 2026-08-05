@@ -1,7 +1,6 @@
 import asyncio
 
 from bb_mpy_module import Led
-
 from can_manager import CanManager
 
 # Module registry for seamless ID, ID_NAME, CAN_ID conversion
@@ -92,18 +91,16 @@ class ModuleManager:
         self.tasks = [
             asyncio.create_task(self.can_manager.can_rx_task()),
             asyncio.create_task(self.can_manager.can_tx_task()),
-            # asyncio.create_task(self.heartbeat_task()),
+            asyncio.create_task(self.heartbeat_task()),
         ]
-        self.heartbeat_interval = 0.02 # 20 ms
+        self.heartbeat_interval = 0.5 # 20 ms
 
-    """
         # Main loop task to handle module logic
-        async def heartbeat_task(self):
-            while True:
-                # Placeholder for module-specific periodic tasks
-
-                await asyncio.sleep(self.heartbeat_interval) 
-    """
+    async def heartbeat_task(self):
+        while True:
+            self.led.toggle()
+            # Placeholder for module-specific periodic tasks
+            await asyncio.sleep(self.heartbeat_interval)
 
     def can_msg_echo_on_serial(self, msg):
         # TODO: check if serial manager exists and available

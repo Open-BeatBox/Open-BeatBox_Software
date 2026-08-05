@@ -22,7 +22,7 @@ def get_platform_serial_ports():
     elif platform.system() == "Darwin":
         ports = [p for p in comports if 'usbserial' in p.device]
     elif platform.system() == "Linux":
-        ports = [p for p in comports if 'ACM' in p.device]  # TODO: check if USB[0-9] is better
+        ports = [p for p in comports if 'ACM' in p.device or 'USB' in p.device]  # TODO: check if USB[0-9] is better
     else:
         raise NotImplementedError(f"Platform {platform.system()} not supported.")
     return ports
@@ -144,6 +144,7 @@ class BeatBoxCommunicator(QtCore.QObject):  # needs to inherit from QObject to u
                     logger.debug("Multiple handshake messages received, taking the latest one.")
                     self.rx_buffer = self.rx_buffer.rsplit(b'ready:', 1)[-1]
 
+                rx_copy = self.rx_buffer
                 while b'\n' in self.rx_buffer:
                     if self.rx_buffer.startswith(b'\r') or self.rx_buffer.startswith(b'\n'):
                         # Remove the leading \r
@@ -158,6 +159,10 @@ class BeatBoxCommunicator(QtCore.QObject):  # needs to inherit from QObject to u
                         continue
                     else:
                         raise ValueError(f"Unexpected data during handshake: {self.rx_buffer}")
+
+                    if line in (b'\x00', b'\x00\r'):
+                        logger.debug("Skipping null-only handshake frame.")
+                        continue
 
                     # TODO check if we need line.strip()
                     msg_string = line.decode()
@@ -181,8 +186,10 @@ class BeatBoxCommunicator(QtCore.QObject):  # needs to inherit from QObject to u
         except Exception as e:
             if IN_TEST:
                 logging.critical(f"Error during handshake: {e}")
+                logging.critical(f"RX buffer: {rx_copy}")
             else:
                 self.errorOccurred.emit(f"Error during handshake: {e}")
+                self.errorOccurred.emit(f"RX buffer: {rx_copy}")
             return False
 
     def flush(self):

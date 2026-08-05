@@ -45,7 +45,7 @@ class TestSerialManager:
 
     def test_register_command_callback(self, serial_manager, mock_callback):
         """Test callback registration"""
-        serial_manager.register_command_callback(mock_callback)
+        serial_manager.register_rx_callback(mock_callback)
         assert len(serial_manager.command_callbacks) == 1
         assert mock_callback in serial_manager.command_callbacks
 
@@ -54,8 +54,8 @@ class TestSerialManager:
         callback1 = AsyncMock()
         callback2 = AsyncMock()
 
-        serial_manager.register_command_callback(callback1)
-        serial_manager.register_command_callback(callback2)
+        serial_manager.register_rx_callback(callback1)
+        serial_manager.register_rx_callback(callback2)
 
         assert len(serial_manager.command_callbacks) == 2
         assert callback1 in serial_manager.command_callbacks
@@ -126,7 +126,7 @@ class TestSerialManager:
     @pytest.mark.asyncio
     async def test_serial_handler_task_rx_processing(self, serial_manager, mock_callback):
         """Test serial handler processes received commands"""
-        serial_manager.register_command_callback(mock_callback)
+        serial_manager.register_rx_callback(mock_callback)
         test_command = "TEST_COMMAND"
 
         with patch('serial_manager.supervisor') as mock_supervisor, \
@@ -155,8 +155,8 @@ class TestSerialManager:
         failing_callback = AsyncMock(side_effect=Exception("Test exception"))
         working_callback = AsyncMock()
 
-        serial_manager.register_command_callback(failing_callback)
-        serial_manager.register_command_callback(working_callback)
+        serial_manager.register_rx_callback(failing_callback)
+        serial_manager.register_rx_callback(working_callback)
 
         test_command = "TEST_COMMAND"
 
@@ -188,7 +188,7 @@ class TestSerialManager:
     @pytest.mark.asyncio
     async def test_empty_command_handling(self, serial_manager, mock_callback):
         """Test that empty commands are ignored"""
-        serial_manager.register_command_callback(mock_callback)
+        serial_manager.register_rx_callback(mock_callback)
 
         with patch('serial_manager.supervisor') as mock_supervisor, \
                 patch('builtins.input', return_value="   "):  # Whitespace only
@@ -210,7 +210,7 @@ class TestSerialManager:
     @pytest.mark.asyncio
     async def test_no_serial_data_available(self, serial_manager, mock_callback):
         """Test behavior when no serial data is available"""
-        serial_manager.register_command_callback(mock_callback)
+        serial_manager.register_rx_callback(mock_callback)
 
         with patch('serial_manager.supervisor') as mock_supervisor:
             mock_supervisor.runtime.serial_bytes_available = False
@@ -275,7 +275,7 @@ class TestSerialManagerIntegration:
         async def command_handler(command):
             received_commands.append(command)
 
-        serial_manager.register_command_callback(command_handler)
+        serial_manager.register_rx_callback(command_handler)
 
         # Queue some messages
         await serial_manager.send_message("MSG1\n")
