@@ -160,21 +160,14 @@ class HardwarePanel(QWidget):
 
     # ─── Control change → signal ──────────────────────────────────
 
-    def _on_control_changed(self, checked_pins=None):
-        """Read all actuator states, merge with explicit overrides, and emit.
+    def _on_control_changed(self, *_):
+        """Emit a full actuator snapshot derived from current UI widget states.
 
-        Report user actions, the manager handles reward auto-off, pulse duration, etc.
+        Qt signals attached to this handler pass scalar payloads (e.g. int/bool),
+        but this panel always computes the complete pin state directly from controls.
         """
         ordered_names = self._act_cfg.pin_names
-
-        if not isinstance(checked_pins, (list, tuple, None)):
-            raise ValueError(f'checked_pins should be list, tuple or None, got {type(checked_pins)}')
-
-        if checked_pins is None:
-            checked = [self.actuator_controls[name].isChecked() for name in ordered_names]
-        else:
-            checked = [self.actuator_controls[name].isChecked() or pin_on
-                       for name, pin_on in zip(ordered_names, checked_pins)]
+        checked = [self.actuator_controls[name].isChecked() for name in ordered_names]
 
         # Uncheck reward visually — manager will handle the pulse
         reward_ctrl = self.actuator_controls.get('reward')
