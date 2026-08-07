@@ -15,18 +15,58 @@ from beatbox.gui.bb_logging import logger  # shared logger
 IN_TEST = 'pytest' in globals()
 DEBUG = True
 
-def get_platform_serial_ports():
-    comports = list_ports.comports()
-    if platform.system() == "Windows":
-        ports = [p for p in comports if 'COM' in p.device]
-    elif platform.system() == "Darwin":
-        ports = [p for p in comports if 'usbserial' in p.device]
-    elif platform.system() == "Linux":
-        ports = [p for p in comports if 'ACM' in p.device]  # TODO: check if USB[0-9] is better
-    else:
-        raise NotImplementedError(f"Platform {platform.system()} not supported.")
-    return ports
+from serial.tools import list_ports
 
+# Known BeatBox-compatible USB identifiers
+_BEATBOX_USB_IDS: set[tuple[int, int]] = {
+    (0x2341, 0x0042),  # Arduino SA — Mega 2560 R3
+    (0x2A03, 0x0042),  # dog hunter AG — Mega 2560 Rev3
+}
+
+# Broader fallback: any board from these vendors
+_FTDI_VID = 0x0403  # FTDI — always included regardless of PID or other matches
+_KNOWN_ARDUINO_VIDS: set[int] = {
+    0x2341,  # Arduino SA
+    0x2A03,  # dog hunter AG / Arduino.org
+    0x1A86,  # CH340 (cheap clones)
+    _FTDI_VID,
+    0x10C4,  # Silicon Labs CP210x
+}
+
+
+def get_platform_serial_ports(beatbox_only: bool = True) -> list:
+    """Return serial ports, optionally filtered to BeatBox-compatible devices.
+
+    Parameters
+    ----------
+    beatbox_only : bool
+        If True, only return ports matching known BeatBox USB VID/PID pairs.
+        Falls back to known Arduino vendor IDs if no exact matches found.
+        If False, return all serial ports.
+    """
+    all_ports = list_ports.comports()
+
+    if not beatbox_only:
+        return all_ports
+
+    # Try exact VID/PID match first
+    candidates = [p for p in all_ports
+             if p.vid is not None and (p.vid, p.pid) in _BEATBOX_USB_IDS]
+
+    # Always include FTDI ports (any PID), merged with exact matches.
+    ftdi_ports = [p for p in all_ports if p.vid == _FTDI_VID]
+    combined = list({p.device: p for p in candidates + ftdi_ports}.values())
+    if combined:
+        return combined
+
+    # Fall back to known Arduino vendors
+    vendor = [p for p in all_ports
+              if p.vid is not None and p.vid in _KNOWN_ARDUINO_VIDS]
+    if vendor:
+        return vendor
+
+    # Last resort: return everything (user can pick manually)
+    return all_ports
 
 class BeatBoxCommunicator(QtCore.QObject):  # needs to inherit from QObject to use signals and slots
     """
