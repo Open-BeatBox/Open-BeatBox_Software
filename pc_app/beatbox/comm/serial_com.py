@@ -64,7 +64,7 @@ class BeatBoxCommunicator(QtCore.QObject):  # needs to inherit from QObject to u
         self.serial_port = None
         self.rx_buffer = b""
         self.sequence = 0
-        self.last_message = b""
+        self.last_message = None
         self._stop_flag = False
         self._reader_thread = None
         self.verbose = DEBUG
@@ -146,22 +146,13 @@ class BeatBoxCommunicator(QtCore.QObject):  # needs to inherit from QObject to u
 
                 rx_copy = self.rx_buffer
                 while b'\n' in self.rx_buffer:
-                    if self.rx_buffer.startswith(b'\r') or self.rx_buffer.startswith(b'\n'):
-                        # Remove the leading \r
-                        self.rx_buffer = self.rx_buffer[1:]
-                        continue
-                    if len(self.rx_buffer) > 2:
-                        line, self.rx_buffer = self.rx_buffer.split(b'\n', 1)
-                        if not line:
-                            continue
-                    elif self.rx_buffer == b'\r\n':
-                        self.rx_buffer = b""
-                        continue
-                    else:
-                        raise ValueError(f"Unexpected data during handshake: {self.rx_buffer}")
+                    line, self.rx_buffer = self.rx_buffer.split(b'\n', 1)
+                    # Some USB-UART adapters/firmwares may inject NUL bytes around line endings.
+                    line = line.replace(b'\x00', b'').strip(b'\r')
 
-                    if line in (b'\x00', b'\x00\r'):
-                        logger.debug("Skipping null-only handshake frame.")
+                    # Ignore transport noise frames that are just separators.
+                    if not line:
+                        logger.debug(f"Skipping empty/null-only handshake frame. Line: {rx_copy}")
                         continue
 
                     # TODO check if we need line.strip()
@@ -223,7 +214,7 @@ class BeatBoxCommunicator(QtCore.QObject):  # needs to inherit from QObject to u
                     line = None  # For error reporting
                     message = None  # For error reporting
                     line, self.rx_buffer = self.rx_buffer.split(b'\n', 1)
-                    line = line.strip()
+                    line = line.replace(b'\x00', b'').strip()
                     if not line:
                         continue # empty line
                     # Parse the line into a BeatBoxMessage
@@ -237,7 +228,6 @@ class BeatBoxCommunicator(QtCore.QObject):  # needs to inherit from QObject to u
                         self.handle_ack(message)
                     elif message.command == 'ready':
                         logging.warning(f'Received ready message "{line.decode()}" outside of handshake.')
-                        self.send_message('ready:')
                         self.handshakeCompleted.emit()
                     elif message.command in ('starting', 'inited'):
                         logging.warning(f"Warning, got {message.command}, this should be reserved to handshake.")
@@ -272,7 +262,7 @@ class BeatBoxCommunicator(QtCore.QObject):  # needs to inherit from QObject to u
             time.sleep(0.001)  # slight delay to avoid busy looping
 
     def handle_ack(self, message: BeatBoxMessage):
-        if message.sequence == self.sequence:
+        if self.last_message is not None and message.sequence == self.last_message.sequence:
             logger.debug("Received ACK for last message.")
         else:
             logger.warning("Received ACK for unknown message.") # FIXME: handle this case

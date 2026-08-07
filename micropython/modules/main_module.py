@@ -8,7 +8,7 @@ from serial_manager import SerialManager, BeatBoxCommManager
 
 is_init = False
 
-BAUD_RATE = 115200
+BAUD_RATE = 921600
 
 class MainModule(ModuleManager):
     def __init__(self):

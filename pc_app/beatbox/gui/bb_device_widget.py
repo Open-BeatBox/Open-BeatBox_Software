@@ -19,8 +19,8 @@ from beatbox.gui.qt_utils import (labeled_spinbox, push_button, swap_button,
                                   selectable_label, safe_delete, add_form_fields, FieldSpec)
 from beatbox.gui.bb_logging import logger
 
-BAUD_RATE = 115200
-SERIAL_TIMEOUT = 2
+BAUD_RATE = 921600
+SERIAL_TIMEOUT = 20
 
 
 class BBDeviceWidget(QWidget):
