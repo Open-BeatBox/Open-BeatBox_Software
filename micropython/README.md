@@ -44,6 +44,49 @@ mpremote connect auto fs cp modules/feeder.py :modules/feeder.py
 mpremote connect auto exec "import modules.feeder as f; f.main()"
 ```
 
+## CAN inter-module protocol
+
+The current CAN inter-module protocol draft is documented in:
+
+- `../beatbox_intermodule_protocol.MD`
+
+The MicroPython implementation helpers for CAN identifier packing/parsing live in:
+
+- `libs/can_protocol.py`
+- `libs/beatbox_module.py`
+
+Quick host-side validation:
+
+```bash
+python -m pytest tests/test_can_protocol.py tests/test_beatbox_can_module_protocol.py -q
+```
+
+## IR barrier module
+
+`modules/ir_barrier.py` implements the `IR_BARRIER` CAN module.
+
+- Monitors GPIO lines `0..7`
+- Registers a falling-edge interrupt on every line
+- Sends a CAN event as soon as any one line triggers
+
+Current payloads:
+
+- `IRBarrierCommand.BARRIER_EVENT` → `[line_index, 1]`
+- `IRBarrierCommand.GET_BARRIER_STATUS` response → `[broken_mask, last_triggered_line]`
+
+Host-side validation:
+
+```bash
+python -m pytest tests/test_ir_barrier_module.py -q
+```
+
+Deploy to a board using the existing deploy helper:
+
+```bash
+python deploy_module.py ir_barrier --dry-run
+python deploy_module.py ir_barrier --as-main --port auto
+```
+
 
 ## Use ISR with MPy
 

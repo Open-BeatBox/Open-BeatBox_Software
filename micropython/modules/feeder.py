@@ -1,7 +1,8 @@
 import asyncio
 
 from machine import Pin, Timer
-from beatbox_module import ModuleManager
+from beatbox_module import ModuleManager, ModuleStatus
+from can_protocol import FeederCommand, MessageType, Priority, parse_identifier
 
 from bb_pin_map import FeederPins as PinMap
 
@@ -93,7 +94,10 @@ class A4988StepperDriver:
         self._running = True
 
         # One complete STEP pulse requires two edges: high then low.
-        self.timer.init(mode=Timer.PERIODIC, freq=step_hz * 2, callback=self._timer_cb, hard=True)
+        try:
+            self.timer.init(mode=Timer.PERIODIC, freq=step_hz * 2, callback=self._timer_cb, hard=True)
+        except TypeError:
+            self.timer.init(mode=Timer.PERIODIC, freq=step_hz * 2, callback=self._timer_cb)
 
     def stop(self):
         self.timer.deinit()
@@ -113,6 +117,7 @@ class FeederModule(ModuleManager):
     def __init__(self):
         super().__init__(module_name="FEEDER")
         self.steps_per_revolution: int = 400
+        self.reward_in_progress = False
         self.stepper: A4988StepperDriver = A4988StepperDriver(
             enable_pin=PinMap.MOTOR_EN,
             step_pin=PinMap.MOTOR_STEP,
@@ -128,6 +133,7 @@ class FeederModule(ModuleManager):
         # A4988 full-step mode is MS1/MS2/MS3 = 0/0/0.
         self.stepper.set_microstep(0, 0, 0)
         self.tasks.append(asyncio.create_task(self.blink()))
+        self.tasks.append(asyncio.create_task(self.report_reward_completion()))
 
     async def blink(self):
         while True:
@@ -140,8 +146,35 @@ class FeederModule(ModuleManager):
             await asyncio.sleep(5)
 
     def rotate(self):
+        if self.stepper.is_running:
+            return False
+        self.status = ModuleStatus.ACTIVE
         self.stepper.set_direction(forward=True)
         self.stepper.start(step_hz=200, steps=self.steps_per_revolution)
+        self.reward_in_progress = True
+        return True
+
+    def command_handler(self, msg):
+        super().command_handler(msg)
+
+        _priority, target_module_id, msg_type, command = parse_identifier(msg.id)
+        if msg_type != MessageType.REQUEST_MODULE or target_module_id != self.id:
+            return
+        if command == FeederCommand.REQUEST_REWARD:
+            self.rotate()
+
+    async def report_reward_completion(self):
+        while True:
+            if self.reward_in_progress and not self.stepper.is_running:
+                self.reward_in_progress = False
+                self.status = ModuleStatus.IDLE
+                self._send_frame(
+                    priority=Priority.STATUS,
+                    msg_type=MessageType.RESPONSE_MODULE,
+                    command=FeederCommand.REWARD_DELIVERED,
+                    payload=bytearray(),
+                )
+            await asyncio.sleep(0.01)
 
 
 def main():

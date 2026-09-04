@@ -6,7 +6,8 @@ import asyncio
 from MCP2515 import MCP2515 as CAN
 from machine import Pin, SPI
 
-from beatbox_module import ModuleManager
+from beatbox_module import ModuleManager, ModuleMap
+from can_protocol import MessageType, Priority, ScreenCommand, parse_identifier
 from bb_pin_map import ScreenPins as pinMap
 
 from random import getrandbits
@@ -235,8 +236,8 @@ def draw_diagonal_lines_tlbr(shift_per_row: int = 1) -> None:
     draw_diagonal_pattern(TLBR, shift_per_row=shift_per_row)
 
 class ScreenModule(ModuleManager):
-    def __init__(self):
-        super().__init__(module_name="SCREEN")
+    def __init__(self, module_name="SCREEN_LEFT"):
+        super().__init__(module_name=module_name)
         # Pass the callback to send CAN message immediately
         self._init_ir_beam()
         self.tasks.append(asyncio.create_task(self.reset_led()))
@@ -247,7 +248,37 @@ class ScreenModule(ModuleManager):
 
     def _on_poke(self):
         self.led.on()
-        self.can_manager.send_normal(data=b"SCT")
+        self._send_frame(
+            priority=Priority.EVENT,
+            msg_type=MessageType.RESPONSE_MODULE,
+            command=ScreenCommand.TOUCH_EVENT,
+            payload=bytearray([1]),
+        )
+
+    def command_handler(self, msg):
+        super().command_handler(msg)
+
+        _priority, target_module_id, msg_type, command = parse_identifier(msg.id)
+        if msg_type != MessageType.REQUEST_MODULE:
+            return
+        if target_module_id != self.id and target_module_id != ModuleMap.BROADCAST_ID:
+            return
+        if command == ScreenCommand.DISPLAY_PATTERN:
+            pattern_id = msg.data[0] if msg.data else 0
+            patterns = (
+                draw_vlines,
+                draw_hlines,
+                draw_grid,
+                draw_diagonal_lines_trbl,
+                draw_diagonal_lines_tlbr,
+            )
+            patterns[pattern_id % len(patterns)]()
+            self._send_frame(
+                priority=Priority.STATUS,
+                msg_type=MessageType.RESPONSE_MODULE,
+                command=ScreenCommand.DISPLAY_PATTERN,
+                payload=bytearray([pattern_id]),
+            )
 
     async def reset_led(self):
         """Reset LED after a short delay."""
@@ -256,7 +287,7 @@ class ScreenModule(ModuleManager):
             await asyncio.sleep(0.1)
 
 def main():
-    screen = ScreenModule()
+    screen = ScreenModule(module_name="SCREEN_LEFT")
     tft.begin()
     # Visual validation: cycle through all ported patterns
     draw_vlines()

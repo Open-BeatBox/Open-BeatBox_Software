@@ -17,6 +17,13 @@ class PinMap:
     CAN_LED = 24
     USER_LED = 25
 
+class MainModulePins(PinMap):
+    """Pin mapping for main module."""
+    CAN_CS = 19
+    CAN_SCK = 14
+    CAN_MOSI = 15
+    CAN_MISO = 8
+
 class NosepokePins(PinMap):
     """Pin mapping for nosepoke module."""
     IR_BEAM_OUT = 9
@@ -49,3 +56,10 @@ class FeederPins(PinMap):
     MOTOR_MS3 = 11
     MOTOR_MS2 = 12
     MOTOR_MS1 = 13
+
+class IRBarrierPins(PinMap):
+    """ Pin mapping for IR barrier module.
+        Each line of the IR barrier is connected to a specific GPIO pin.
+        The IR_BARRIER_LINES tuple defines the mapping of line indices to GPIO pins.
+    """
+    IR_BARRIER_LINES = (0, 7, 1, 6, 2, 5, 3, 4)

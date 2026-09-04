@@ -7,13 +7,25 @@ import time
 from machine import Pin, SPI
 
 from MCP2515 import MCP2515 as CAN
-from canio import Message
+from canio import BusState, Message
 
 from bb_pin_map import PinMap
 # TODO: abstract and merge with CircuitPython version
 
 class CanManager:
-    def __init__(self, tx_schedule_period=0.002, rx_schedule_period=0.005, can_id = None, cs_pin=None):
+    def __init__(
+        self,
+        tx_schedule_period=0.002,
+        rx_schedule_period=0.005,
+        can_id=None,
+        matches=None,
+        cs_pin=None,
+        spi_baudrate=7_812_500,
+        can_baudrate=1_000_000,
+        loopback=False,
+        silent=False,
+        debug=False,
+    ):
         """
         CAN Manager for CircuitPython using MCP2515
 
@@ -25,6 +37,13 @@ class CanManager:
         self.spi = None
         self.can_bus = None
         self.can_id = can_id
+        self.matches = matches
+        self.cs_pin = cs_pin if cs_pin is not None else PinMap.CAN_CS
+        self.spi_baudrate = spi_baudrate
+        self.can_baudrate = can_baudrate
+        self.loopback = loopback
+        self.silent = silent
+        self.debug = debug
         self.init_can_bus()
 
         # Use simple lists instead of asyncio.Queue (not available in CircuitPython)
@@ -44,15 +63,39 @@ class CanManager:
         self.monitoring_enabled = False
         self.last_rx_check = time.ticks_us()
         self.rx_stats = {'messages': 0, 'max_delay': 0}
+        self._last_tx_diag_us = 0
 
-    def init_can_bus(self, spi_baudrate=10_000_000, can_baudrate=1_000_000, crystal_freq=16_000_000):
+    def init_can_bus(self):
         """
         Initialize CAN bus and SPI device, encapsulating private attribute access.
         """
         # Initialize SPI
-        self.spi = SPI(1, baudrate=1_000_000, polarity=0, phase=0, sck=Pin(PinMap.CAN_SCK), mosi=Pin(PinMap.CAN_MOSI), miso=Pin(PinMap.CAN_MISO))
-        self.can_bus = CAN(1, PinMap.CAN_CS, spi_bus=self.spi, loopback=True, silent=True,
-                     debug=False)  # use loopback to test without another device
+        self.spi = SPI(
+            1,
+            baudrate=self.spi_baudrate,
+            polarity=0,
+            phase=0,
+            sck=Pin(PinMap.CAN_SCK),
+            mosi=Pin(PinMap.CAN_MOSI),
+            miso=Pin(PinMap.CAN_MISO),
+        )
+        self.can_bus = CAN(
+            1,
+            self.cs_pin,
+            spi_bus=self.spi,
+            baudrate=self.can_baudrate,
+            loopback=self.loopback,
+            silent=self.silent,
+            debug=self.debug,
+        )
+
+        if self.matches is not None:
+            self.can_bus.configure_filters(self.matches)
+
+    def configure_filters(self, matches=None):
+        """Configure CAN acceptance filters on the underlying MCP2515."""
+        self.matches = matches
+        self.can_bus.configure_filters(matches)
 
     def register_rx_callback(self, callback):
         """
@@ -91,7 +134,6 @@ class CanManager:
             try:
                 # Check for messages - this should be very fast
                 message = self.can_bus.read_message()
-
                 if message is not None:
                     # Call all registered callbacks
                     for callback in self.rx_callbacks:
@@ -129,12 +171,20 @@ class CanManager:
                 # Check urgent queue first
                 if self.urgent_tx_queue:
                     msg = self.urgent_tx_queue.pop(0)
-                    await self._send_message(msg)
-                    continue  # Check again for urgent
+                    sent = await self._send_message(msg)
+                    if not sent:
+                        # TODO: add retry logic with backoff, but for now just log and drop
+                        # log the failed message and do not requeue to avoid blocking
+                        print(f"Failed to send urgent message: ID={msg.id}, data={list(msg.data)}")
+                        await asyncio.sleep(0.01)
 
                 if self.normal_tx_queue:
                     msg = self.normal_tx_queue.pop(0)
-                    await self._send_message(msg)
+                    sent = await self._send_message(msg)
+                    if not sent:
+                        # log the failed message and do not requeue to avoid blocking
+                        print(f"Failed to send normal message: ID={msg.id}, data={list(msg.data)}")
+                        await asyncio.sleep(0.01)
 
             except Exception as e:
                 print(f"CAN TX error: {e}")
@@ -144,4 +194,22 @@ class CanManager:
 
     async def _send_message(self, msg):
         """Internal method to send CAN message"""
-        self.can_bus.send(msg)
+        if self.can_bus.send(msg):
+            return True
+
+        # TX buffers are full, usually because controller is retrying failed frames.
+        now = time.ticks_us()
+        if time.ticks_diff(now, self._last_tx_diag_us) > 500_000:
+            self._last_tx_diag_us = now
+            try:
+                state = self.can_bus.state
+                tec = self.can_bus.transmit_error_count
+                rec = self.can_bus.receive_error_count
+                print(f"CAN TX stalled: state={state} TEC={tec} REC={rec}")
+                if state == BusState.BUS_OFF:
+                    print("CAN BUS_OFF detected, restarting controller")
+                    self.can_bus.restart()
+            except Exception as e:
+                print(f"CAN TX diagnostics error: {e}")
+
+        return False
