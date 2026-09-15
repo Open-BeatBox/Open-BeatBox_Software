@@ -28,6 +28,7 @@ class MainModule(ModuleManager):
     def __init__(self):
         super().__init__(module_name="MAIN")
         # self.serial_manager = SerialManager(serial=UART(0, baudrate=115200, tx=Pin(12), rx=Pin(13)))
+        self.can_manager.reset_filters()
         self.comm = BeatBoxCommManager(serial=UART(0, baudrate=BAUD_RATE, tx=Pin(0), rx=Pin(1)))
         self.serial_manager = self.comm.serial_manager
         # Create tasks for serial manager

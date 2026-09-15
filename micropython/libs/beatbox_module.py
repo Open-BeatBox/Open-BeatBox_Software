@@ -1,6 +1,7 @@
 import asyncio
 
 from bb_mpy_module import Led
+from canio import Match
 from can_manager import CanManager
 from can_protocol import (
     CommonCommand,
@@ -10,6 +11,8 @@ from can_protocol import (
     normalize_payload,
     parse_identifier,
     Priority,
+    MODULE_ID_MASK,
+    MODULE_ID_SHIFT,
 )
 
 try:
@@ -103,8 +106,12 @@ class ModuleManager:
         self.user_button = None
 
         # Use ModuleRegistry for all lookups
-        # TODO: handle invalid module_name
         self.id = ModuleMap.get_id(module_name)
+        if self.id is None:
+            print(f"Unknown module '{module_name}', defaulting to GENERIC")
+            module_name = "GENERIC"
+            self.id = ModuleMap.get_id(module_name)
+
         # FIXME: ID describes a CAN message not a module, remove this and use ModuleMap.build_can_id() for all CAN messages
         self.can_id = ModuleMap.build_can_id(
             module=self.id,
@@ -112,8 +119,14 @@ class ModuleManager:
             msg_type=MessageType.RESPONSE_COMMON,
             command=CommonCommand.GET_STATUS,
         )
+
+        self.can_manager = CanManager(can_id=self.can_id, debug=True)
+        assert self.id is not None
+        module_match = self.build_module_match(self.id)
+        broadcast_match = self.build_module_match(ModuleMap.BROADCAST_ID)
+        self.can_manager.configure_filters([module_match, broadcast_match])
+
         print(f"Module initialized: NAME={module_name}, ID={self.id}")
-        self.can_manager = CanManager(can_id=self.can_id)
         self.can_manager.register_rx_callback(self.can_msg_echo_on_serial)
 
         self._setup_generic_io()
@@ -126,7 +139,14 @@ class ModuleManager:
         ]
         self.heartbeat_interval = 0.5 # 20 ms
 
-        # Main loop task to handle module logic
+    @staticmethod
+    def build_module_match(module_id):
+        """Build a Match filter for a specific module ID"""
+        address = (module_id & MODULE_ID_MASK) << MODULE_ID_SHIFT
+        mask = MODULE_ID_MASK << MODULE_ID_SHIFT
+        return Match(address=address, mask=mask)
+
+    # Main loop task to handle module logic
     async def heartbeat_task(self):
         while True:
             self.led.toggle()

@@ -97,6 +97,12 @@ class CanManager:
         self.matches = matches
         self.can_bus.configure_filters(matches)
 
+    def reset_filters(self):
+        """Reset CAN acceptance filters to default (accept all)."""
+        self.matches = None
+        self.can_bus.deinit_filtering_registers()
+
+
     def register_rx_callback(self, callback):
         """
         Register callback for received CAN message

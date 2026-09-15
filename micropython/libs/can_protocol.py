@@ -12,6 +12,9 @@ MODULE_ID_MASK = 0x0F
 MESSAGE_TYPE_MASK = 0x03
 COMMAND_MASK = 0x03
 
+PRIO_SHIFT = 0x8
+MODULE_ID_SHIFT = 0x4
+MSG_TYPE_SHIFT = 0x2
 
 class Priority:
     ERROR = 0b000
@@ -80,7 +83,8 @@ def build_identifier(priority, module_id, msg_type, command):
     module_nibble = module_id & MODULE_ID_MASK
     msg_bits = msg_type & MESSAGE_TYPE_MASK
     cmd_nibble = command & COMMAND_MASK
-    return (priority_bits << 8) | (module_nibble << 4) | (msg_bits << 2) | cmd_nibble
+    return (priority_bits << PRIO_SHIFT) | (module_nibble << MODULE_ID_SHIFT) | (
+                msg_bits << MSG_TYPE_SHIFT) | cmd_nibble
 
 
 def parse_identifier(can_id):
@@ -104,4 +108,3 @@ def normalize_payload(payload):
     if len(out) > 8:
         raise ValueError("CAN payload must be <= 8 bytes")
     return out
-
