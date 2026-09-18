@@ -12,26 +12,17 @@ class IRBarrierModule(ModuleManager):
         super().__init__(module_name="IR_BARRIER")
         self.sensors = []
         self.last_triggered_line = 0xFF
-        # self._init_ir_barriers()
-        self._init_ir_barrier()
+        self._init_ir_barriers()
         self.tasks.append(asyncio.create_task(self.reset_led()))
 
     def _init_ir_barriers(self):
         for line_index, pin_number in enumerate(PinMap.IR_BARRIER_LINES):
-            sensor = Pin(pin_number, Pin.IN)
+            sensor = Pin(pin_number, Pin.IN, Pin.PULL_UP) # need a pull-up because the IR sensor is open drain
             sensor.irq(
                 trigger=Pin.IRQ_FALLING,
                 handler=self._make_irq_handler(line_index),
             )
             self.sensors.append(sensor)
-
-    def _init_ir_barrier(self):
-        sensor = Pin(0, Pin.IN)
-        sensor.irq(
-            trigger=Pin.IRQ_FALLING,
-            handler=self._make_irq_handler(1),
-        )
-        self.sensors.append(sensor)
 
     def _make_irq_handler(self, line_index):
         """ Create an IRQ handler for a specific line index."""

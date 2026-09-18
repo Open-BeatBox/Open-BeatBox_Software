@@ -28,6 +28,7 @@ class NosepokePins(PinMap):
     """Pin mapping for nosepoke module."""
     IR_BEAM_OUT = 9
     IR_BEAM_IN = 10
+    USER_BTN = 4
 
 class ScreenPins(PinMap):
     """Pin mapping for screen module."""
@@ -62,4 +63,4 @@ class IRBarrierPins(PinMap):
         Each line of the IR barrier is connected to a specific GPIO pin.
         The IR_BARRIER_LINES tuple defines the mapping of line indices to GPIO pins.
     """
-    IR_BARRIER_LINES = (0, 7, 1, 6, 2, 5, 3, 4)
+    IR_BARRIER_LINES = (3, 4, 2, 5, 1, 6, 0, 7)

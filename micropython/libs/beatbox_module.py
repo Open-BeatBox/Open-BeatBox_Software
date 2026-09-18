@@ -1,7 +1,14 @@
 import asyncio
 
 from bb_mpy_module import Led
-from canio import Match
+try:
+    from canio import Match
+except ImportError:
+    class Match:
+        def __init__(self, address, mask):
+            self.address = address
+            self.mask = mask
+
 from can_manager import CanManager
 from can_protocol import (
     CommonCommand,
@@ -21,9 +28,16 @@ except ImportError:
     _MachinePin = None
 
 try:
-    from bb_pin_map import PinMap as _PinMap
+    import bb_pin_map as _bb_pin_map
 except Exception:
-    _PinMap = None
+    _bb_pin_map = None
+
+_DefaultPinMap = getattr(_bb_pin_map, "PinMap", None)
+_FeederPins = getattr(_bb_pin_map, "FeederPins", None)
+_IRBarrierPins = getattr(_bb_pin_map, "IRBarrierPins", None)
+_MainModulePins = getattr(_bb_pin_map, "MainModulePins", None)
+_NosepokePins = getattr(_bb_pin_map, "NosepokePins", None)
+_ScreenPins = getattr(_bb_pin_map, "ScreenPins", None)
 
 # Module registry for seamless ID, ID_NAME, CAN_ID conversion
 class ModuleMap:
@@ -99,8 +113,6 @@ class ModuleManager:
     and can extend functionality by overriding methods.
     """
     def __init__(self, module_name: str = "GENERIC"):
-        self.led = Led()
-        self.led.on()
         self.can_led = None
         self._can_led_state = False
         self.user_button = None
@@ -111,6 +123,12 @@ class ModuleManager:
             print(f"Unknown module '{module_name}', defaulting to GENERIC")
             module_name = "GENERIC"
             self.id = ModuleMap.get_id(module_name)
+
+        self.module_name = module_name
+        self.pin_map = self._create_pin_map(module_name)
+        user_led_pin = None if self.pin_map is None else getattr(self.pin_map, "USER_LED", None)
+        self.led = Led(pin_num=user_led_pin)
+        self.led.on()
 
         # FIXME: ID describes a CAN message not a module, remove this and use ModuleMap.build_can_id() for all CAN messages
         self.can_id = ModuleMap.build_can_id(
@@ -124,7 +142,9 @@ class ModuleManager:
         assert self.id is not None
         module_match = self.build_module_match(self.id)
         broadcast_match = self.build_module_match(ModuleMap.BROADCAST_ID)
-        self.can_manager.configure_filters([module_match, broadcast_match])
+        configure_filters = getattr(self.can_manager, "configure_filters", None)
+        if callable(configure_filters):
+            configure_filters([module_match, broadcast_match])
 
         print(f"Module initialized: NAME={module_name}, ID={self.id}")
         self.can_manager.register_rx_callback(self.can_msg_echo_on_serial)
@@ -138,6 +158,22 @@ class ModuleManager:
             # asyncio.create_task(self.heartbeat_task()),
         ]
         self.heartbeat_interval = 0.5 # 20 ms
+
+    @staticmethod
+    def _create_pin_map(module_name):
+        if module_name == "MAIN" and _MainModulePins is not None:
+            return _MainModulePins()
+        if module_name == "FEEDER" and _FeederPins is not None:
+            return _FeederPins()
+        if module_name == "NOSEPOKE" and _NosepokePins is not None:
+            return _NosepokePins()
+        if module_name in ("SCREEN_LEFT", "SCREEN_RIGHT") and _ScreenPins is not None:
+            return _ScreenPins()
+        if module_name == "IR_BARRIER" and _IRBarrierPins is not None:
+            return _IRBarrierPins()
+        if _DefaultPinMap is not None:
+            return _DefaultPinMap()
+        return None
 
     @staticmethod
     def build_module_match(module_id):
@@ -166,26 +202,30 @@ class ModuleManager:
         self.can_manager.send_normal(can_id=can_id, data=normalize_payload(payload))
 
     def _setup_generic_io(self):
-        if _PinMap is None:
+        pin_map = self.pin_map
+        pin_cls = _MachinePin
+        if pin_map is None:
             return
 
         try:
-            self.can_led = Led(pin_num=_PinMap.CAN_LED)
+            self.can_led = Led(pin_num=getattr(pin_map, "CAN_LED", None))
             self.can_led.off()
             self._can_led_state = False
         except Exception:
             self.can_led = None
 
-        pin_cls = _MachinePin
-        if self.id != ModuleMap.get_id("GENERIC") or pin_cls is None:
+        if self.id != ModuleMap.get_id("GENERIC"):
+            return
+
+        if pin_cls is None:
             return
 
         try:
             pull_up = pin_cls.PULL_UP if hasattr(pin_cls, "PULL_UP") else None
             if pull_up is None:
-                self.user_button = pin_cls(_PinMap.USER_BTN, pin_cls.IN)
+                self.user_button = pin_cls(pin_map.USER_BTN, pin_cls.IN)
             else:
-                self.user_button = pin_cls(_PinMap.USER_BTN, pin_cls.IN, pull_up)
+                self.user_button = pin_cls(pin_map.USER_BTN, pin_cls.IN, pull_up)
             self.user_button.irq(trigger=pin_cls.IRQ_FALLING, handler=self._on_user_button_irq)
         except Exception:
             self.user_button = None
@@ -194,8 +234,9 @@ class ModuleManager:
         self.emit_user_button_event()
 
     def emit_user_button_event(self):
-        if self.id != ModuleMap.get_id("GENERIC"):
-            return
+        # if self.id != ModuleMap.get_id("GENERIC"):
+        #     return
+        self.led.on()
         self._send_frame(
             priority=Priority.EVENT,
             msg_type=MessageType.RESPONSE_MODULE,
