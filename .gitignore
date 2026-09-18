@@ -1,0 +1,10 @@
+# SolidWorks / Office lock files
+~$*
+
+# Python bytecode
+__pycache__/
+*.pyc
+
+# OS cruft
+.DS_Store
+Thumbs.db
