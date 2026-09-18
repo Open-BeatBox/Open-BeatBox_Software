@@ -1,0 +1,44 @@
+# TODO before release:
+#   - confirm the author list and its order with all named contributors
+#   - add ORCIDs (orcid: "https://orcid.org/0000-0000-0000-0000") and affiliations
+#   - add the DOI under identifiers, and a preferred-citation block, once the paper is out
+cff-version: 1.2.0
+message: "If you use Open-BEATBox in published work, please cite it as below."
+title: "Open-BEATBox"
+type: software
+abstract: "Open-BEATBox (Open - BEhavioural and AuTonomous operant Box) is an open-source, modular, low-cost platform for autonomous home-cage operant conditioning and long-duration behavioural data acquisition in rodents. This repository holds the Open-BEATBox control, acquisition and analysis software."
+authors:
+  - family-names: "Burguiere"
+    given-names: "Eric"
+  - family-names: "Euvrard"
+    given-names: "Marine"
+  - family-names: "Domingues"
+    given-names: "Daniela"
+  - family-names: "Benzina"
+    given-names: "Nabil"
+  - family-names: "Ajili"
+    given-names: "Zenneddine"
+  - family-names: "Penderia"
+    given-names: "Guillaume"
+  - family-names: "Rousseau"
+    given-names: "Charlie"
+  - family-names: "Tissier"
+    given-names: "Pierre"
+  - family-names: "Pavlov"
+    given-names: "Pierre"
+  - family-names: "Lebegue"
+    given-names: "Lucile"
+  - family-names: "Huzard"
+    given-names: "Damien"
+  - family-names: "Mondragon-Gonzalez"
+    given-names: "Lizbeth"
+repository-code: "https://github.com/Open-BeatBox/Open-BeatBox_Software"
+url: "https://open-beatbox.github.io/"
+license: AGPL-3.0-or-later
+keywords:
+  - open hardware
+  - behavioural neuroscience
+  - home-cage monitoring
+  - operant conditioning
+  - rodent behaviour
+  - open science
