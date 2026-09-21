@@ -3,7 +3,7 @@ import machine
 """
 As we are using the Adafruit Feather RP2040 CAN as the model board,
 pin definitions are based on its layout and naming might be confusing.
-TODO: define a custom board for each BeatBox module to avoid confusion.
+TODO: define a custom Micropython board for each BeatBox module to avoid confusion.
 """
 
 class PinMap:
@@ -19,13 +19,25 @@ class PinMap:
 
 class MainModulePins(PinMap):
     """Pin mapping for main module."""
-    CAN_CS = 19
-    CAN_SCK = 14
-    CAN_MOSI = 15
-    CAN_MISO = 8
+    UART_TX = 0
+    UART_RX = 1
+    UART_RTS = 2
+    UART_CTS = 3
+    RTC_I2C_SDA = 9
+    RTC_I2C_SCL = 10
+    USER_BTN = 11
+    CAN_LED = 28
+    USER_LED = 29
+    SD_MISO = 4
+    SD_CS = 5
+    SD_SCLK = 6
+    SD_MOSI = 7
+    SD_CD = 8
 
 class NosepokePins(PinMap):
     """Pin mapping for nosepoke module."""
+    UART_TX = 0
+    UART_RX = 1
     IR_BEAM_OUT = 9
     IR_BEAM_IN = 10
     USER_BTN = 4
@@ -46,9 +58,20 @@ class ScreenPins(PinMap):
     LCD_D5 = 5
     LCD_D6 = 6
     LCD_D7 = 7
+    USER_BTN = 21
+    LCD_ANALOG_BACKLIGHT = 28
+    LCD_ANALOG_CSS = 29
+
+class LightingPins(PinMap):
+    """Pin mapping for lighting module."""
+    PCA9955B_I2C_SDA = 2
+    PCA9955B_I2C_SCL = 3
+    USER_BTN = 21
 
 class FeederPins(PinMap):
     """Pin mapping for feeder module."""
+    UART_TX = 0
+    UART_RX = 1
     MOTOR_EN = 5
     MOTOR_RST = 6
     MOTOR_SLEEP = 7
@@ -57,6 +80,10 @@ class FeederPins(PinMap):
     MOTOR_MS3 = 11
     MOTOR_MS2 = 12
     MOTOR_MS1 = 13
+    FOOD_SENSOR_IN = 20
+    USER_BTN = 4
+    CAN_LED = 28
+    USER_LED = 27
 
 class IRBarrierPins(PinMap):
     """ Pin mapping for IR barrier module.
@@ -64,3 +91,11 @@ class IRBarrierPins(PinMap):
         The IR_BARRIER_LINES tuple defines the mapping of line indices to GPIO pins.
     """
     IR_BARRIER_LINES = (3, 4, 2, 5, 1, 6, 0, 7)
+    I2C_SDA = 9
+    I2C_SCL = 10
+    IO_11 = 11
+    IO_12 = 12
+    IO_13 = 13
+    IO_20 = 20
+    IO_28 = 28
+    IO_29 = 29
