@@ -10,6 +10,7 @@ from MCP2515 import MCP2515 as CAN
 from canio import BusState, Message
 
 from bb_pin_map import PinMap
+from bb_mpy_module import Led
 # TODO: abstract and merge with CircuitPython version
 
 class CanManager:
@@ -24,7 +25,8 @@ class CanManager:
         can_baudrate=1_000_000,
         loopback=False,
         silent=False,
-        debug=False,
+        led : Led | None = None,
+        debug=True,
     ):
         """
         CAN Manager for CircuitPython using MCP2515
@@ -41,6 +43,10 @@ class CanManager:
         self.cs_pin = cs_pin if cs_pin is not None else PinMap.CAN_CS
         self.spi_baudrate = spi_baudrate
         self.can_baudrate = can_baudrate
+        if led is not None:
+            self.led = led
+        else:
+            self.led = None
         self.loopback = loopback
         self.silent = silent
         self.debug = debug
@@ -64,6 +70,14 @@ class CanManager:
         self.last_rx_check = time.ticks_us()
         self.rx_stats = {'messages': 0, 'max_delay': 0}
         self._last_tx_diag_us = 0
+
+    def led_on(self):
+        if self.led:
+            self.led.on()
+
+    def led_off(self):
+        if self.led:
+            self.led.off()
 
     def init_can_bus(self):
         """
@@ -141,6 +155,7 @@ class CanManager:
                 # Check for messages - this should be very fast
                 message = self.can_bus.read_message()
                 if message is not None:
+                    self.led_on()
                     # Call all registered callbacks
                     for callback in self.rx_callbacks:
                         try:
@@ -148,6 +163,7 @@ class CanManager:
                         except Exception as e:
                             print(f"CAN RX callback error: {e}")
 
+                    self.led_off()
                     # Update stats
                     self.rx_stats['messages'] += 1
 
@@ -176,6 +192,7 @@ class CanManager:
             try:
                 # Check urgent queue first
                 if self.urgent_tx_queue:
+                    self.led_on()
                     msg = self.urgent_tx_queue.pop(0)
                     sent = await self._send_message(msg)
                     if not sent:
@@ -183,15 +200,17 @@ class CanManager:
                         # log the failed message and do not requeue to avoid blocking
                         print(f"Failed to send urgent message: ID={msg.id}, data={list(msg.data)}")
                         await asyncio.sleep(0.01)
+                    self.led_off()
 
                 if self.normal_tx_queue:
+                    self.led_on()
                     msg = self.normal_tx_queue.pop(0)
                     sent = await self._send_message(msg)
                     if not sent:
                         # log the failed message and do not requeue to avoid blocking
                         print(f"Failed to send normal message: ID={msg.id}, data={list(msg.data)}")
                         await asyncio.sleep(0.01)
-
+                    self.led_off()
             except Exception as e:
                 print(f"CAN TX error: {e}")
 

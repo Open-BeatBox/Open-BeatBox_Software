@@ -45,6 +45,7 @@ MODULE_EXTRA_SPECS: dict[str, tuple[CopySpec, ...]] = {
     "nosepoke": (),
     "main_module": (
         CopySpec(ROOT / "libs/serial_manager.py", ":serial_manager.py"),
+        CopySpec(ROOT / "libs/cli_protocol.py", ":cli_protocol.py"),
     ),
     "screenmodule": (
         CopySpec(

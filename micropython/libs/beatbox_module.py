@@ -14,6 +14,7 @@ from can_protocol import (
     CommonCommand,
     GenericCommand,
     MessageType,
+    ModuleMap,
     build_identifier,
     normalize_payload,
     parse_identifier,
@@ -39,48 +40,9 @@ _MainModulePins = getattr(_bb_pin_map, "MainModulePins", None)
 _NosepokePins = getattr(_bb_pin_map, "NosepokePins", None)
 _ScreenPins = getattr(_bb_pin_map, "ScreenPins", None)
 
-# Module registry for seamless ID, ID_NAME, CAN_ID conversion
-class ModuleMap:
-    _entries = [
-        ("GENERIC", 0x0),
-        ("MAIN", 0x1),
-        ("FEEDER", 0x2),
-        ("NOSEPOKE", 0x3),
-        ("SCREEN_LEFT", 0x4),
-        ("SCREEN_RIGHT", 0x5),
-        ("LIGHTING", 0x6),
-        ("IR_BARRIER", 0x7),
-        ("BROADCAST", 0xF),
-    ]
-    name_to_id = {name: mid for name, mid in _entries}
-    id_to_name = {mid: name for name, mid in _entries}
-    BROADCAST_ID = name_to_id["BROADCAST"]
-
-    @classmethod
-    def get_id(cls, value):
-        if isinstance(value, int):
-            if value in cls.id_to_name:
-                return value
-        elif isinstance(value, str):
-            return cls.name_to_id.get(value)
-        return None
-
-    @classmethod
-    def get_name(cls, value):
-        if isinstance(value, int):
-            if value in cls.id_to_name:
-                return cls.id_to_name[value]
-        elif isinstance(value, str):
-            if value in cls.name_to_id:
-                return value
-        return None
-
-    @classmethod
-    def build_can_id(cls, module, priority, msg_type, command):
-        module_id = cls.get_id(module)
-        if module_id is None:
-            return None
-        return build_identifier(priority=priority, module_id=module_id, msg_type=msg_type, command=command)
+# Module registry for seamless ID, ID_NAME, CAN_ID conversion.
+# Defined in can_protocol so it can be used without the MicroPython runtime;
+# re-exported here for backward compatibility.
 
 class ModuleStatus:
     INIT = "INIT" # not configured
@@ -129,6 +91,7 @@ class ModuleManager:
         user_led_pin = None if self.pin_map is None else getattr(self.pin_map, "USER_LED", None)
         self.led = Led(pin_num=user_led_pin)
         self.led.on()
+        self.can_led = Led(pin_num=getattr(self.pin_map, "CAN_LED", None))
 
         # FIXME: ID describes a CAN message not a module, remove this and use ModuleMap.build_can_id() for all CAN messages
         self.can_id = ModuleMap.build_can_id(
@@ -138,7 +101,7 @@ class ModuleManager:
             command=CommonCommand.GET_STATUS,
         )
 
-        self.can_manager = CanManager(can_id=self.can_id, debug=True)
+        self.can_manager = CanManager(can_id=self.can_id, debug=True, led=self.can_led)
         assert self.id is not None
         module_match = self.build_module_match(self.id)
         broadcast_match = self.build_module_match(ModuleMap.BROADCAST_ID)

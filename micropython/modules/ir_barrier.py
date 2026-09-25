@@ -77,3 +77,4 @@ def main():
     ir_barrier = IRBarrierModule()
     asyncio.run(ir_barrier.start_managers())
 
+main()

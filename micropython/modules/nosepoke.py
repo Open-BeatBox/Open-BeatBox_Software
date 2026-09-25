@@ -58,3 +58,5 @@ class NosepokeModule(ModuleManager):
 def main():
     nose_poke = NosepokeModule()
     asyncio.run(nose_poke.start_managers())
+
+main()

@@ -36,12 +36,6 @@ class LightingModule(ModuleManager):
         }
         self._active_group_index = None
         self._configure_led_driver()
-        self.tasks.append(asyncio.create_task(self.blink()))
-
-    async def blink(self):
-        while True:
-            self.led.toggle()
-            await asyncio.sleep(0.5)
 
     def _configure_led_driver(self):
         self.led_driver.reset()
@@ -71,11 +65,12 @@ class LightingModule(ModuleManager):
             self.led_driver.channels[channel_index].brightness = duty
 
     def _apply_duty_payload(self, payload):
-        if len(payload) >= 1:
+        length = len(payload)
+        if length >= 1:
             self._set_group_duty("WHITE", payload[0])
-        if len(payload) >= 2:
+        if length >= 2:
             self._set_group_duty("RED", payload[1])
-        if len(payload) >= 3:
+        if length >= 3:
             self._set_group_duty("IR", payload[2])
 
     def command_handler(self, msg):
@@ -147,3 +142,5 @@ class LightingModule(ModuleManager):
 def main():
     lighting = LightingModule()
     asyncio.run(lighting.start_managers())
+
+main()

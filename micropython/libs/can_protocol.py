@@ -78,6 +78,50 @@ class IRBarrierCommand:
     BARRIER_EVENT = 0x1
 
 
+# Module registry for seamless ID, ID_NAME, CAN_ID conversion
+class ModuleMap:
+    _entries = [
+        ("GENERIC", 0x0),
+        ("MAIN", 0x1),
+        ("FEEDER", 0x2),
+        ("NOSEPOKE", 0x3),
+        ("SCREEN_LEFT", 0x4),
+        ("SCREEN_RIGHT", 0x5),
+        ("LIGHTING", 0x6),
+        ("IR_BARRIER", 0x7),
+        ("BROADCAST", 0xF),
+    ]
+    name_to_id = {name: mid for name, mid in _entries}
+    id_to_name = {mid: name for name, mid in _entries}
+    BROADCAST_ID = name_to_id["BROADCAST"]
+
+    @classmethod
+    def get_id(cls, value):
+        if isinstance(value, int):
+            if value in cls.id_to_name:
+                return value
+        elif isinstance(value, str):
+            return cls.name_to_id.get(value)
+        return None
+
+    @classmethod
+    def get_name(cls, value):
+        if isinstance(value, int):
+            if value in cls.id_to_name:
+                return cls.id_to_name[value]
+        elif isinstance(value, str):
+            if value in cls.name_to_id:
+                return value
+        return None
+
+    @classmethod
+    def build_can_id(cls, module, priority, msg_type, command):
+        module_id = cls.get_id(module)
+        if module_id is None:
+            return None
+        return build_identifier(priority=priority, module_id=module_id, msg_type=msg_type, command=command)
+
+
 def build_identifier(priority, module_id, msg_type, command):
     priority_bits = priority & PRIORITY_MASK
     module_nibble = module_id & MODULE_ID_MASK

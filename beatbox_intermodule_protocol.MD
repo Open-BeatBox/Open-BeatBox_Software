@@ -73,8 +73,11 @@ No response may use `MODULE=0xF`.
 | 01   | 00  | SCAN_REPLY | Response  | P3           | `status_code:uint8` |
 | 00   | 01  | GET_STATUS | Request   | P3           | none |
 | 01   | 01  | STATUS     | Response  | P3           | `status_code:uint8` |
-| 01   | 10  | ERROR      | Response  | P0           | `error_code:uint8` |
+| 01   | 10  | ERROR      | Response  | P0           | `error_code:uint8` (+ optional module-specific context bytes) |
 | 00   | 11  | RESET      | Request   | P1           | `delay_ms:uint16` big-endian |
+
+Modules may append context bytes after `error_code`. Receivers must tolerate an
+`ERROR` payload longer than one byte. See section 4.1 for the feeder case.
 
 Status values:
 - `0`: INIT
@@ -99,7 +102,50 @@ Status values:
 | TYPE | CMD | Name             | Direction | Default PRIO | Payload |
 |------|-----|------------------|-----------|--------------|---------|
 | 10   | 01  | REQUEST_REWARD   | Request   | P1           | none |
-| 11   | 01  | REWARD_DELIVERED | Response  | P3           | none |
+| 11   | 01  | REWARD_DELIVERED | Response  | P3           | `attempts:uint8` (`1..20`) |
+
+`REQUEST_REWARD` must be addressed to `MODULE=0x2`; the feeder ignores it on
+`BROADCAST`, so a reward is never delivered by accident.
+
+#### Delivery sequence
+
+One reward is a twentieth of a revolution of the feeder disc. Pellet arrival is
+detected by an IR barrier interrupt local to the feeder module, and is not
+visible on the bus.
+
+1. Main sends `REQUEST_REWARD`. The feeder switches to `ACTIVE` and starts
+   turning. A second `REQUEST_REWARD` received while a delivery is running is
+   ignored; poll `GET_STATUS` to observe progress.
+2. The feeder turns 1/20 revolution, then waits up to 500 ms for the pellet.
+3. If no pellet is detected, it retries from step 2, up to 20 attempts total
+   (one full revolution of the disc).
+4. On detection the motor stops immediately, the module returns to `IDLE` and
+   sends `REWARD_DELIVERED`. The payload reports how many attempts were needed:
+   `1` on first try, up to `20`.
+
+A reward therefore completes in about 500 ms in the nominal case, and can take
+up to ~10 s before being reported as failed. Main must not assume a fixed
+latency between `REQUEST_REWARD` and `REWARD_DELIVERED`.
+
+An `attempts` value consistently greater than `1` indicates a feeder running low
+or a disc starting to jam, and is worth logging as a health metric.
+
+#### Delivery failure
+
+If the 20 attempts elapse without a pellet, the feeder sends the common `ERROR`
+response (`TYPE=01`, `CMD=10`, `P0`) instead of `REWARD_DELIVERED`, and stays in
+`ERROR` status until the next successful reward.
+
+The error payload extends the generic `error_code:uint8` form with the command
+that failed and the number of attempts made:
+
+| Byte | Meaning |
+|------|---------|
+| 0    | `error_code:uint8` = failing command, `0x01` for `REQUEST_REWARD` |
+| 1    | `attempts:uint8` = attempts made before giving up |
+
+No `REWARD_DELIVERED` is emitted in this case. A new `REQUEST_REWARD` is
+accepted while the module is in `ERROR`, so main can retry after refilling.
 
 ### 4.2 Nosepoke (`MODULE=0x3`)
 
@@ -157,6 +203,14 @@ This avoids permanent dominance by low module IDs and matches the target policy:
   - bits: `010 0011 11 01`
 - Lighting set duty (`P1`, `LIGHTING`, module request, `SET_DUTY`):
   - bits: `001 0110 10 00`
+- Feeder reward request (`P1`, `FEEDER`, module request, `REQUEST_REWARD`):
+  - bits: `001 0010 10 01`, ID `0x129`, no payload
+- Feeder reward delivered on the third attempt (`P3`, `FEEDER`, module response,
+  `REWARD_DELIVERED`):
+  - bits: `011 0010 11 01`, ID `0x32D`, payload `03`
+- Feeder delivery failure after 20 attempts (`P0`, `FEEDER`, common response,
+  `ERROR`):
+  - bits: `000 0010 01 10`, ID `0x026`, payload `01 14`
 
 ## 7) Capacity note
 

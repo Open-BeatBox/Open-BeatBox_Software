@@ -289,12 +289,15 @@ class ScreenModule(ModuleManager):
 def main():
     screen = ScreenModule(module_name="SCREEN_LEFT")
     tft.begin()
+    '''
     # Visual validation: cycle through all ported patterns
     draw_vlines()
     draw_hlines()
     draw_grid()
     draw_diagonal_lines_trbl()
     draw_diagonal_lines_tlbr()
+    '''
     asyncio.run(screen.start_managers())
 
 
+main()
