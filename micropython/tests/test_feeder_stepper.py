@@ -179,7 +179,7 @@ async def _run_reward(module, feeder, pellet_on_attempt, max_attempts=4):
             break
         if module.stepper.is_running:
             attempts += 1
-            module.stepper.timer.fire()
+            module.stepper.debounce_timer.fire()
             if pellet_on_attempt and attempts == pellet_on_attempt:
                 module.feeder_ir_barrier.trigger_irq()
         await asyncio.sleep(0)
@@ -196,11 +196,11 @@ def test_reward_rotates_one_twentieth_of_a_revolution(monkeypatch):
 
     # 360/0.8 = 450 full steps per revolution, 1/8 microstepping, 1/20 revolution -> 180 microsteps.
     assert module.stepper.is_running is True
-    assert module.stepper.timer.mode == FakeTimer.ONE_SHOT
-    assert module.stepper.timer.period == 450  # 180 microsteps at 400 Hz
+    assert module.stepper.debounce_timer.mode == FakeTimer.ONE_SHOT
+    assert module.stepper.debounce_timer.period == 450  # 180 microsteps at 400 Hz
     assert module.stepper.step_pwm.duty_u16() > 0
 
-    module.stepper.timer.fire()
+    module.stepper.debounce_timer.fire()
 
     assert module.stepper.is_running is False
     assert module.stepper.step_pwm.duty_u16() == 0

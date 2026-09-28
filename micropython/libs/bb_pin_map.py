@@ -90,7 +90,8 @@ class IRBarrierPins(PinMap):
         Each line of the IR barrier is connected to a specific GPIO pin.
         The IR_BARRIER_LINES tuple defines the mapping of line indices to GPIO pins.
     """
-    IR_BARRIER_LINES = (3, 4, 2, 5, 1, 6, 0, 7)
+    # IR_BARRIER_LINES = (3, 4, 2, 5, 1, 6, 0, 7)
+    IR_BARRIER_LINES = (1,)
     I2C_SDA = 9
     I2C_SCL = 10
     IO_11 = 11

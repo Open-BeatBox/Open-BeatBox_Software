@@ -2,16 +2,15 @@
 # Uses the 8-bit parallel ILI9341 driver (libs/ILI9341-parallel-TFT-driver-for-micropython/ILI9341.py)
 
 import asyncio
+import time
 
 from MCP2515 import MCP2515 as CAN
-from machine import Pin, SPI
+from machine import Pin, SPI, Timer
 
 from beatbox_module import ModuleManager, ModuleMap
 from can_protocol import MessageType, Priority, ScreenCommand, parse_identifier
 from bb_pin_map import ScreenPins as pinMap
 
-from random import getrandbits
-from time import sleep_ms, ticks_ms, ticks_diff
 import ILI9341
 
 try:
@@ -63,52 +62,98 @@ _WHITE_LO = WHITE & 0xFF
 _BLACK_HI = (BLACK >> 8) & 0xFF
 _BLACK_LO = BLACK & 0xFF
 
+# D0..D7 verified contiguous from GPIO0 on this board.
+_D0_BASE  = pinMap.LCD_D0
+_BUS_MASK = 0xFF << _D0_BASE
+_WR_MASK  = 1 << pinMap.LCD_WR
 
 @micropython.viper
-def _build_diagonal_row_viper(
-    row_buf: ptr8,
-    width: int,
-    pattern_pos: int,
-    pattern_len: int,
-    direction: int,
-    is_white: ptr8,
-    white_hi: int,
-    white_lo: int,
-    black_hi: int,
-    black_lo: int,
-):
-    """Fill one RGB565 row buffer using viper integer loops."""
+def _blit_sio(buf: ptr8, n: int, bus_mask: int, d0: int, wr: int):
+    """4 stores/byte; skips the bus update when the byte is unchanged.
+    Measured 0.701 us/byte -> 336 us per 480-byte row."""
+    setr = ptr32(0xd0000014)      # SIO GPIO_OUT_SET
+    clrr = ptr32(0xd0000018)      # SIO GPIO_OUT_CLR
+    last = -1
+    i = 0
+    while i < n:
+        b = int(buf[i])
+        if b != last:
+            clrr[0] = bus_mask
+            setr[0] = b << d0
+            last = b
+        clrr[0] = wr
+        setr[0] = wr
+        i += 1
+
+
+@micropython.viper
+def _build_diag_row(row_buf: ptr8, width: int, v0: int, step: int,
+                    thick: int, inc: int,
+                    fg_hi: int, fg_lo: int, bg_hi: int, bg_lo: int):
+    """Scanline fill of v = x*H + y*W; stripes are v mod step."""
+    v = v0
     x = 0
     idx = 0
     while x < width:
-        # Keep this as a literal inside viper code (global lookups are objects).
-        if direction == 0:
-            px = (x + pattern_pos) % pattern_len
+        if v < thick:
+            row_buf[idx] = fg_hi
+            row_buf[idx + 1] = fg_lo
         else:
-            px = (x - pattern_pos + pattern_len) % pattern_len
-
-        if is_white[px]:
-            row_buf[idx] = white_hi
-            row_buf[idx + 1] = white_lo
-        else:
-            row_buf[idx] = black_hi
-            row_buf[idx + 1] = black_lo
-
+            row_buf[idx] = bg_hi
+            row_buf[idx + 1] = bg_lo
+        v += inc
+        if v >= step:
+            v -= step
         x += 1
         idx += 2
 
 
-def _write_row_rgb565(y: int, row_buf: bytearray) -> None:
-    """Write one full RGB565 row in a single address window transaction."""
+def _write_row_sio(y: int, row_buf: bytearray) -> None:
     tft.setAddrWindow(0, y, WIDTH - 1, y)
     tft.CS_ACTIVE()
     tft.WriteCmd(tft._MW)
-    for b in row_buf:
-        tft.write8(b)
-    tft.CS_IDLE()
+    tft.write8(row_buf[0])          # puts RS in data state via the driver
+    _blit_sio(row_buf, WIDTH * 2, _BUS_MASK, _D0_BASE, _WR_MASK)
+    tft.CS_IDLE()                   # note: re-sends pixel 0 hi byte (1-byte error)
 
+
+def draw_diag_sio(stripes: int = 21, thick_px: int = 5, direction: int = TRBL,
+                  fg: int = WHITE, bg: int = BLACK) -> None:
+    """Diagonal stripes at the screen's corner-to-corner slope. ~803 ms.
+
+    stripes:  number of stripes across the diagonal; must be < 2*WIDTH
+              so that step > HEIGHT (single-subtraction reduction).
+    thick_px: horizontal run of a stripe. Perpendicular width is
+              thick_px * W/sqrt(W^2+H^2) ~= 0.6*thick_px at 240x320,
+              so 3 gives a ~2 px stripe.
+    """
+    step  = (2 * WIDTH * HEIGHT) // stripes
+    thick = thick_px * HEIGHT
+    fg_hi, fg_lo = (fg >> 8) & 0xFF, fg & 0xFF
+    bg_hi, bg_lo = (bg >> 8) & 0xFF, bg & 0xFF
+
+    row_buf = bytearray(WIDTH * 2)
+    for y in range(HEIGHT):
+        v0 = (y * WIDTH) % step if direction == TRBL else (-y * WIDTH) % step
+        _build_diag_row(row_buf, WIDTH, v0, step, thick, HEIGHT,
+                        fg_hi, fg_lo, bg_hi, bg_lo)
+        _write_row_sio(y, row_buf)
+
+
+def draw_diagonal_lines_trbl(shift_per_row: int = 1) -> None:
+    draw_diag_sio(direction=TRBL)
+
+
+def draw_diagonal_lines_tlbr(shift_per_row: int = 1) -> None:
+    draw_diag_sio(direction=TLBR)
 
 # ── Functions ported from screen_tasks.ino ────────────────────────────────────
+
+def draw_white():
+    tft.fillscreen(WHITE)
+
+def draw_black():
+    tft.fillscreen(BLACK)
 
 def draw_vlines(thick: int = 1,
                 num_lines: int = 10,
@@ -173,131 +218,104 @@ def draw_grid(thick: int = 1,
             tft.drawFastHLine(0, center - t, WIDTH, WHITE)
 
 
-def draw_diagonal_pattern(direction: int = TRBL,
-                           pattern: bytes = _DIAGONAL_PATTERN,
-                           pattern_length: int = _PATTERN_LENGTH,
-                           shift_per_row: int = 1) -> None:
-    """Draw a diagonal stripe pattern across the full WIDTH×HEIGHT screen.
+############################ SCREEN MODULE CLASS ############################
 
-    Implemented performance improvements:
-      1) The per-pixel row generation loop now runs in a @micropython.viper
-         function (`_build_diagonal_row_viper`).
-      2) Each line is pre-built as an RGB565 bytearray and pushed with a single
-         address-window transaction (`_write_row_rgb565`).
-
-    Remaining options to explore for improved performance:
-      3) Move the row write itself to viper/native code (avoid Python `for b`).
-      4) Use the RP2040 PIO path (`ILI9341_RP2_PIO`) to stream writes via DMA.
-
-    Args:
-        direction:      TRBL or TLBR – controls which way the stripe leans.
-        pattern:        Bytes where each bit (MSB first) = 1 means white pixel.
-        pattern_length: Total number of bits in the repeating pattern.
-        shift_per_row:  Pixels the pattern shifts horizontally per row.
-    """
-    tft.fillscreen(BLACK)
-
-    # Decode bit pattern once into 0/1 bytes for viper-friendly lookup.
-    is_white = bytearray(pattern_length)
-    for i in range(pattern_length):
-        byte_val = pattern[i // 8]
-        bit = 7 - (i % 8)   # MSB first – matches the Arduino original
-        is_white[i] = 1 if (byte_val & (1 << bit)) else 0
-
-    row_buf = bytearray(WIDTH * 2)
-    pattern_pos = 0
-    for y in range(HEIGHT):
-        _build_diagonal_row_viper(
-            row_buf,
-            WIDTH,
-            pattern_pos,
-            pattern_length,
-            direction,
-            is_white,
-            _WHITE_HI,
-            _WHITE_LO,
-            _BLACK_HI,
-            _BLACK_LO,
-        )
-        _write_row_rgb565(y, row_buf)
-
-        pattern_pos = (pattern_pos + shift_per_row) % pattern_length
-
-
-def draw_diagonal_lines_trbl(shift_per_row: int = 1) -> None:
-    """Diagonal stripes leaning top-right → bottom-left.
-    """
-    draw_diagonal_pattern(TRBL, shift_per_row=shift_per_row)
-
-
-def draw_diagonal_lines_tlbr(shift_per_row: int = 1) -> None:
-    """Diagonal stripes leaning top-left → bottom-right.
-    """
-    draw_diagonal_pattern(TLBR, shift_per_row=shift_per_row)
+TOUCH_DEBOUNCE_PERIOD_MS = 50  # debounce period in milliseconds
 
 class ScreenModule(ModuleManager):
+    PAT_BLACK = 0
+    PAT_WHITE = 1
+    PAT_BLINK = 2
+    PAT_VERTICAL = 3
+    PAT_HORIZONTAL = 4
+    PAT_GRID = 5
+    PAT_TRBL = 6
+    PAT_TLBR = 7
+
     def __init__(self, module_name="SCREEN_LEFT"):
         super().__init__(module_name=module_name)
-        # Pass the callback to send CAN message immediately
-        self._init_ir_beam()
-        self.tasks.append(asyncio.create_task(self.reset_led()))
+        self.previous_pattern = None
+        self.current_pattern = self.PAT_BLACK
+        self.blink_period_ms = 200
+        self._blink_on = False
+        self._blink_next = time.ticks_ms()
+        self.touch_pending = False
+        self.touch_detected = False
+        self.debounce_ms = TOUCH_DEBOUNCE_PERIOD_MS
+        self._last_touch = time.ticks_ms()
+
+        self.patterns = {
+            self.PAT_BLACK: draw_black,
+            self.PAT_WHITE: draw_white,
+            self.PAT_BLINK: draw_black,          # first frame; task drives the rest
+            self.PAT_VERTICAL: draw_vlines,
+            self.PAT_HORIZONTAL: draw_hlines,
+            self.PAT_GRID: draw_grid,
+            self.PAT_TRBL: draw_diagonal_lines_trbl,
+            self.PAT_TLBR: draw_diagonal_lines_tlbr,
+        }
+
+        self.tasks.append(asyncio.create_task(self.update_pattern()))
+        self.tasks.append(asyncio.create_task(self.touch_reporter()))
+        self._init_ir_beam()          # last: everything it needs now exists
 
     def _init_ir_beam(self):
         self.sensor = Pin(pinMap.IR_BEAM, Pin.IN)
         self.sensor.irq(trigger=Pin.IRQ_FALLING, handler=lambda pin: self._on_poke())
 
     def _on_poke(self):
-        self.led.on()
-        self._send_frame(
-            priority=Priority.EVENT,
-            msg_type=MessageType.RESPONSE_MODULE,
-            command=ScreenCommand.TOUCH_EVENT,
-            payload=bytearray([1]),
-        )
+        now = time.ticks_ms()
+        if time.ticks_diff(now, self._last_touch) < self.debounce_ms:
+            return
+        self._last_touch = now
+        self.touch_pending = True
+
+    async def touch_reporter(self):
+        while True:
+            if self.touch_pending:
+                self.touch_pending = False
+                self.led.on()
+                self._send_frame(priority=Priority.EVENT,
+                                 msg_type=MessageType.RESPONSE_MODULE,
+                                 command=ScreenCommand.TOUCH_EVENT,
+                                 payload=bytearray([1]))
+                await asyncio.sleep(0.05)
+                self.led.off()
+            await asyncio.sleep(0.01)
 
     def command_handler(self, msg):
         super().command_handler(msg)
-
         _priority, target_module_id, msg_type, command = parse_identifier(msg.id)
         if msg_type != MessageType.REQUEST_MODULE:
             return
         if target_module_id != self.id and target_module_id != ModuleMap.BROADCAST_ID:
             return
         if command == ScreenCommand.DISPLAY_PATTERN:
-            pattern_id = msg.data[0] if msg.data else 0
-            patterns = (
-                draw_vlines,
-                draw_hlines,
-                draw_grid,
-                draw_diagonal_lines_trbl,
-                draw_diagonal_lines_tlbr,
-            )
-            patterns[pattern_id % len(patterns)]()
-            self._send_frame(
-                priority=Priority.STATUS,
-                msg_type=MessageType.RESPONSE_MODULE,
-                command=ScreenCommand.DISPLAY_PATTERN,
-                payload=bytearray([pattern_id]),
-            )
+            self.current_pattern = msg.data[0] if msg.data else 0
 
-    async def reset_led(self):
-        """Reset LED after a short delay."""
+    async def update_pattern(self):
         while True:
-            self.led.off()
-            await asyncio.sleep(0.1)
+            pattern = self.current_pattern          # snapshot, ISR-safe
+            if pattern != self.previous_pattern:
+                print("Updating pattern to", pattern)
+                self.previous_pattern = pattern
+                self._blink_on = False
+                self._blink_next = time.ticks_ms()
+                self.patterns[pattern]()
+                self._send_frame(priority=Priority.STATUS,
+                                 msg_type=MessageType.RESPONSE_MODULE,
+                                 command=ScreenCommand.DISPLAY_PATTERN,
+                                 payload=bytearray([pattern]))
+            elif pattern == self.PAT_BLINK and \
+                 time.ticks_diff(time.ticks_ms(), self._blink_next) >= 0:
+                self._blink_next = time.ticks_ms() + self.blink_period_ms
+                self._blink_on = not self._blink_on
+                draw_white() if self._blink_on else draw_black()
+            await asyncio.sleep(0.01)
 
 def main():
-    screen = ScreenModule(module_name="SCREEN_LEFT")
     tft.begin()
-    '''
-    # Visual validation: cycle through all ported patterns
-    draw_vlines()
-    draw_hlines()
-    draw_grid()
-    draw_diagonal_lines_trbl()
-    draw_diagonal_lines_tlbr()
-    '''
+    screen = ScreenModule(module_name="SCREEN_RIGHT")
     asyncio.run(screen.start_managers())
-
 
 main()

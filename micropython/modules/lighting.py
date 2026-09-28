@@ -23,7 +23,6 @@ WHITE_CHANNEL_GROUP = LightingChannelGroup("WHITE", (4, 5))
 CHANNEL_GROUPS = (IR_CHANNEL_GROUP, RED_CHANNEL_GROUP, WHITE_CHANNEL_GROUP)
 
 
-
 class LightingModule(ModuleManager):
     def __init__(self):
         super().__init__(module_name="LIGHTING")
