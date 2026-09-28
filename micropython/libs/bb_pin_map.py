@@ -59,8 +59,8 @@ class ScreenPins(PinMap):
     LCD_D6 = 6
     LCD_D7 = 7
     USER_BTN = 21
-    LCD_ANALOG_BACKLIGHT = 28
-    LCD_ANALOG_CSS = 29
+    LCD_BACKLIGHT = 28
+    LCD_CSS = 29
 
 class LightingPins(PinMap):
     """Pin mapping for lighting module."""

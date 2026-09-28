@@ -52,6 +52,14 @@ MODULE_EXTRA_SPECS: dict[str, tuple[CopySpec, ...]] = {
             ROOT / "libs/ILI9341-parallel-TFT-driver-for-micropython/ILI9341_RP2/ILI9341.py",
             ":ILI9341.py",
         ),
+        CopySpec(
+            ROOT / "libs/ILI9341-parallel-TFT-driver-for-micropython/ILI9341_RP2/ILI9341_char.py",
+            ":ILI9341_char.py",
+            ),
+        CopySpec(
+            ROOT / "libs/ILI9341-parallel-TFT-driver-for-micropython/ILI9341_RP2/ILI9341_touch.py",
+            ":ILI9341_touch.py",
+        ),
     ),
     "lighting": (
         CopySpec(ROOT / "libs/CircuitPython_PCA9955B/pca9955b/__init__.py", ":pca9955b/__init__.py"),
