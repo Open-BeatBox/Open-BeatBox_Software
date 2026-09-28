@@ -20,8 +20,7 @@ sys.modules['adafruit_mcp2515'] = MagicMock()
 sys.modules['adafruit_mcp2515.canio'] = MagicMock()
 
 # Assuming SerialManager is in serial_manager.py
-from serial_manager import SerialManager
-
+from libs.serial_manager import SerialManager
 
 class TestSerialManager:
     """Test suite for SerialManager class"""
