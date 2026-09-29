@@ -33,6 +33,7 @@ SHARED_SPECS: tuple[CopySpec, ...] = (
     CopySpec(ROOT / "libs/can_protocol.py", ":can_protocol.py"),
     CopySpec(ROOT / "libs/beatbox_module.py", ":beatbox_module.py"),
     CopySpec(ROOT / "libs/bb_pin_map.py", ":bb_pin_map.py"),
+    CopySpec(ROOT / "libs/bb_ticks.py", ":bb_ticks.py")
 )
 
 MODULE_EXTRA_SPECS: dict[str, tuple[CopySpec, ...]] = {
@@ -46,6 +47,12 @@ MODULE_EXTRA_SPECS: dict[str, tuple[CopySpec, ...]] = {
     "main_module": (
         CopySpec(ROOT / "libs/serial_manager.py", ":serial_manager.py"),
         CopySpec(ROOT / "libs/cli_protocol.py", ":cli_protocol.py"),
+        CopySpec(ROOT / "libs/bb_frontends.py", ":bb_frontends.py"),
+        CopySpec(ROOT / "libs/bb_events.py", ":bb_events.py"),
+        CopySpec(ROOT / "libs/bb_intents.py", ":bb_intents.py"),
+        CopySpec(ROOT / "libs/bb_v2_map.py", ":bb_v2_map.py"),
+        CopySpec(ROOT / "libs/bb_v2_comm.py", ":bb_v2_comm.py"),
+        CopySpec(ROOT / "libs/bb_v2_emulator.py", ":bb_v2_emulator.py"),
     ),
     "screenmodule": (
         CopySpec(

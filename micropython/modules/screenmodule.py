@@ -315,7 +315,7 @@ class ScreenModule(ModuleManager):
 
 def main():
     tft.begin()
-    screen = ScreenModule(module_name="SCREEN_RIGHT")
+    screen = ScreenModule(module_name="SCREEN_LEFT")
     asyncio.run(screen.start_managers())
 
 main()

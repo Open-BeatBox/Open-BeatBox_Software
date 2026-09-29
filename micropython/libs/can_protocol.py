@@ -16,6 +16,10 @@ PRIO_SHIFT = 0x8
 MODULE_ID_SHIFT = 0x4
 MSG_TYPE_SHIFT = 0x2
 
+# Group ordering must match modules/lighting.py CHANNEL_GROUPS.
+LIGHTING_GROUPS = ("IR", "RED", "WHITE")
+
+
 class Priority:
     ERROR = 0b000
     CONTROL = 0b001
@@ -69,8 +73,13 @@ class LightingCommand:
 
 
 class FeederCommand:
-    REQUEST_REWARD = 0x1
-    REWARD_DELIVERED = 0x1
+    # requests (TYPE=10)
+    GET_REWARD_STATUS = 0x0
+    REQUEST_REWARD = 0x1     # autonomous: feeder runs its own retry loop
+    REWARD_ON = 0x2          # direct motor control, V2-style
+    REWARD_OFF = 0x3
+    # responses (TYPE=11) - separate namespace, values may overlap requests
+    REWARD_STATUS = 0x0      # payload: state:uint8, 1 = pellet present
 
 
 class IRBarrierCommand:
@@ -119,16 +128,24 @@ class ModuleMap:
         module_id = cls.get_id(module)
         if module_id is None:
             return None
-        return build_identifier(priority=priority, module_id=module_id, msg_type=msg_type, command=command)
+        return build_identifier(priority=priority, module_id=module_id,
+                                msg_type=msg_type, command=command)
 
 
 def build_identifier(priority, module_id, msg_type, command):
+    # CMD is 2 bits: masking silently aliases 0x4 onto 0x0, so fail loudly.
+    if command > COMMAND_MASK:
+        raise ValueError("command 0x%X exceeds the 2-bit CMD field" % command)
+    if module_id > MODULE_ID_MASK:
+        raise ValueError("module 0x%X exceeds the 4-bit MODULE field" % module_id)
     priority_bits = priority & PRIORITY_MASK
     module_nibble = module_id & MODULE_ID_MASK
     msg_bits = msg_type & MESSAGE_TYPE_MASK
     cmd_nibble = command & COMMAND_MASK
-    return (priority_bits << PRIO_SHIFT) | (module_nibble << MODULE_ID_SHIFT) | (
-                msg_bits << MSG_TYPE_SHIFT) | cmd_nibble
+    return ((priority_bits << PRIO_SHIFT)
+            | (module_nibble << MODULE_ID_SHIFT)
+            | (msg_bits << MSG_TYPE_SHIFT)
+            | cmd_nibble)
 
 
 def parse_identifier(can_id):

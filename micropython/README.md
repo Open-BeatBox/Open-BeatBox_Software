@@ -26,30 +26,6 @@ https://docs.micropython.org/en/latest/reference/reset_boot.html#boot-sequence
 
 `modules/feeder.py` implements the `FEEDER` CAN module and its A4988 stepper driver.
 
-A reward is a twentieth of a revolution. On `FeederCommand.REQUEST_REWARD` the
-module rotates 1/20 rev, waits 0.5 s for the `feeder_ir_barrier` interrupt
-(`FeederPins.FOOD_SENSOR_IN`, active low, falling edge) and retries until a
-pellet is detected or `MAX_REWARD_ATTEMPTS` (one full revolution) is reached.
-
-- Success: `FeederCommand.REWARD_DELIVERED` with `[attempt_count]` as payload
-- Failure: `CommonCommand.ERROR` at `Priority.ERROR`, module status `ERROR`
-
-- Local host-side unit tests: `tests/test_feeder_stepper.py`
-- Device entry point: `modules/feeder.py` (`main()`)
-
-Quick checks:
-
-```bash
-python -m pytest tests/test_feeder_stepper.py -q
-```
-
-Run on target with mpremote (adapt port and copy flow to your board setup):
-
-```bash
-python deploy_module.py feeder
-mpremote connect auto exec "import feeder; feeder.main()"
-```
-
 ## CAN inter-module protocol
 
 The current CAN inter-module protocol draft is documented in:
@@ -71,7 +47,7 @@ python -m pytest tests/test_can_protocol.py tests/test_beatbox_can_module_protoc
 
 `modules/ir_barrier.py` implements the `IR_BARRIER` CAN module.
 
-- Monitors GPIO lines `0..7`
+- Can monitor GPIO lines `0..7`, make sure the lines are all defined in bb_pin_map.py
 - Registers a falling-edge interrupt on every line
 - Sends a CAN event as soon as any one line triggers
 
@@ -114,7 +90,7 @@ Wiring: main module `UART0` (`tx=GP0`, `rx=GP1`, 921600 baud) to a USB-serial ad
 which shows up as `/dev/ttyUSB0` by default.
 
 Deploy the main module with `CLI_MODE = True` (top of `modules/main_module.py`). In this mode
-the legacy BB Mega V2 emulation (`BeatBoxCommManager` handshake and framed commands) is not
+the legacy BB Mega V2 emulation (`V2WireCodec` handshake and framed commands) is not
 started, so the link carries CLI traffic only. Debug logs stay on the USB REPL.
 
 ```bash
@@ -160,3 +136,26 @@ Host-side validation:
 ```bash
 python -m pytest tests/test_cli_protocol.py -q
 ```
+
+
+## Beatbox modules flashing
+
+After receiving your Beatbox modules, when connecting a USB cable to the module, it should appear as a USB RPI-RP2 device.
+The device is running the UF2 bootloader, which allows you to flash firmware onto it.
+
+If the board does not go into bootloader mode, you can press the reset button quickly twice while pressing the boot button to enter bootloader mode.
+If you still cannot enter into bootloader, but can access the REPL, you can use the `machine.bootloader()` command to enter bootloader mode or
+`mpremote bootloader` to enter bootloader mode from the host.
+
+To make it MicroPython compatible, you need to flash the MicroPython firmware on it.
+Download the MicroPython firmware and drag and drop the `.uf2` file to the RPI-RP2 device. 
+The module will reboot and appear as a USB serial device.
+
+The MicroPython firmware use for this project is 'ADAFRUIT_FEATHER_RP2040-20260406-v1.28.0.uf2'.
+Note that the ADAFRUIT_FEATHER_RP2040 board is used as the base for the Beatbox custom modules, so the MicroPython firmware for this board is compatible with the Beatbox modules.
+In order to use the MicroPython firmware with different BeatboxModules using a different pinout or base, you will need either a custom MicroPython firmware or a custom pin mapping file.
+
+Now that the MicroPython firmware is flashed, you can use `mpremote` to copy the module files to the device, or use the `deploy_module.py` script to deploy a module to the device.
+
+'mpremote' is a command line tool that allows you to interact with MicroPython devices over USB or serial. You can use it to copy files, run scripts, and access the REPL.
+
