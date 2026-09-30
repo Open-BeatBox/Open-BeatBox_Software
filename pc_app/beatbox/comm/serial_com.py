@@ -173,45 +173,29 @@ class BeatBoxCommunicator(QtCore.QObject):  # needs to inherit from QObject to u
             start = datetime.now().timestamp()
 
             while (datetime.now().timestamp() - start) < self.serial_timeout:
-                logging.debug(f'{self.__class__.__name__} waiting for handshake')
-                time.sleep(0.1)  # short sleep to yield thread time  # FIXME: diminish this
                 data = self.serial_port.read(self.serial_port.in_waiting or 1)
                 if data:
-                    self.rx_buffer += data
-
-                # if more than 1 handshake in the queue take the latest one
-                if self.rx_buffer.count(b'ready') > 1:
-                    logger.debug("Multiple handshake messages received, taking the latest one.")
-                    self.rx_buffer = self.rx_buffer.rsplit(b'ready:', 1)[-1]
+                    # Some USB-UART adapters inject NUL bytes around line endings.
+                    self.rx_buffer += data.replace(b'\x00', b'')
 
                 while b'\n' in self.rx_buffer:
-                    if self.rx_buffer.startswith(b'\r') or self.rx_buffer.startswith(b'\n'):
-                        # Remove the leading \r
-                        self.rx_buffer = self.rx_buffer[1:]
+                    line, self.rx_buffer = self.rx_buffer.split(b'\n', 1)
+                    line = line.strip(b'\r\n')
+                    if not line:
                         continue
-                    if len(self.rx_buffer) > 2:
-                        line, self.rx_buffer = self.rx_buffer.split(b'\n', 1)
-                        if not line:
-                            continue
-                    elif self.rx_buffer == b'\r\n':
-                        self.rx_buffer = b""
-                        continue
-                    else:
-                        raise ValueError(f"Unexpected data during handshake: {self.rx_buffer}")
 
-                    # TODO check if we need line.strip()
-                    msg_string = line.decode()
-                    msg = BeatBoxMessage(msg_string)
+                    msg = BeatBoxMessage(line.decode())
                     if msg.command == "ready":
                         logger.debug(f"Received handshake response: {line.decode()}")
                         self.handshakeCompleted.emit()
                         self.start_reader_thread()
                         return True
-                    elif msg.command in ('starting', 'inited'):
-                        logger.debug(f'Received MCU startup command {msg.command} message: {line.decode()}')
+                    if msg.command in ('starting', 'inited'):
+                        logger.debug(f"MCU startup frame: {line.decode()}")
                         continue
-                    else:
-                        logging.warning(f"Unexpected message during handshake: {line.decode()}")
+                    logger.debug(f"Ignoring pre-handshake frame: {line.decode()}")
+
+                time.sleep(0.02)
 
             if IN_TEST:
                 logging.error("Handshake timeout.")
