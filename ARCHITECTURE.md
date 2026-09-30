@@ -1,4 +1,3 @@
-markdown
 # Beatbox — software architecture
 
 Beatbox is an autonomous behavioural box. A host application runs the
