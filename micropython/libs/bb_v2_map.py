@@ -24,8 +24,10 @@ SCREEN_L = ModuleMap.get_id("SCREEN_LEFT")
 SCREEN_R = ModuleMap.get_id("SCREEN_RIGHT")
 IR_BARRIER = ModuleMap.get_id("IR_BARRIER")
 
-SCREEN_LEFT_BITS = ("fig_1_left", "fig_2_left", "fig_3_left", "blink_left")
-SCREEN_RIGHT_BITS = ("fig_1_right", "fig_2_right", "fig_3_right", "blink_right")
+# Slices of OUTPUT_PIN_ORDER so the nibble bit order can never drift from the
+# V2 word layout: blink is the group's bit 0, fig_1..3 follow.
+SCREEN_LEFT_BITS = Emu.OUTPUT_PIN_ORDER[1:5]   # blink_left, fig_1..3_left
+SCREEN_RIGHT_BITS = Emu.OUTPUT_PIN_ORDER[5:9]  # blink_right, fig_1..3_right
 
 # Which CAN module owns the V2 'nose_poke' pin. The food-well sensor lives on
 # the feeder, so FEEDER.REWARD_STATUS drives it. Set to True only if a separate

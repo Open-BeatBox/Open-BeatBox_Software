@@ -13,7 +13,7 @@ BAUD_RATE = 921600
 DEBUG = False
 # Deploy-time mode selection. CLI_MODE=True gives the validation CLI
 # (tools/bb_cli.py) the UART; False runs the legacy BB Mega V2 emulation.
-CLI_MODE = True
+CLI_MODE = False
 
 
 class MainModule(ModuleManager):

@@ -301,6 +301,9 @@ class ScreenModule(ModuleManager):
                 self.previous_pattern = pattern
                 self._blink_on = False
                 self._blink_next = time.ticks_ms()
+                if pattern >= len(self.patterns):
+                    print("Unknown pattern:", pattern)
+                    continue
                 self.patterns[pattern]()
                 self._send_frame(priority=Priority.STATUS,
                                  msg_type=MessageType.RESPONSE_MODULE,
@@ -315,7 +318,7 @@ class ScreenModule(ModuleManager):
 
 def main():
     tft.begin()
-    screen = ScreenModule(module_name="SCREEN_LEFT")
+    screen = ScreenModule(module_name="SCREEN_RIGHT")
     asyncio.run(screen.start_managers())
 
 main()

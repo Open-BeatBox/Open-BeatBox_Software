@@ -116,7 +116,7 @@ class V2WireCodec:
                 self.handshake_status = self.HANDSHAKE_DONE_STATUS
                 print("Handshake completed")
                 break
-            await asyncio.sleep(0.1)
+            await asyncio.sleep(0.5)
 
     def process_handshake(self, message):
         """Firmware parity: handshake only checks incoming startswith('ready:')."""
