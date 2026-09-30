@@ -1,110 +1,148 @@
-Activate the conda environment.
+# Beatbox firmware (MicroPython)
 
-mpremote
+Firmware for the RP2040-based Beatbox modules. For the overall architecture —
+how the host application, the main module and the peripheral modules fit
+together, and what *intents* and *events* are — see the
+[parent README](../README.md).
 
-import the module through repl
-exec main
+---
 
-main.py is called automatically if there's a main.py file in the root of the project.
-Call a function from main.py to automatically run the code on boot. You can also use the REPL to call functions from main.py.
+## ⚠️ Disclaimer
 
-mpremote copies files to the device. You can use it to copy main.py to the root of the device, or copy a file from the device to your computer.
 
-> mpremote ls
-> mpremote cp `path/on/host` :`path/on/device`
-> mpremote rm `path/on/device`
+Ongoing development version; see the roadmap in the [parent README](../README.md).
+Tests scripts and the CLI are not yet stable and some might be broken.
 
-``` shell
-mpremote
-  import module.py
-  module.function()
+---
+
+## Layout
+
+```
+libs/        shared infrastructure
+             can_protocol    identifier packing, per-module command tables
+             beatbox_module  ModuleManager base class, status codes
+             cli_protocol    text command grammar (shared with tools/bb_cli.py)
+             bb_pin_map      per-board pin assignments
+
+modules/     module roles and the main module's protocol layers
+             main_module     host-facing module: wiring and CAN fan-out
+             feeder, ir_barrier, ...   one file per peripheral role
+             bb_intents      Intent + one builder per logical action
+             bb_events       Event + the CAN decoder
+             frontends       CliFrontend, V2Frontend
+             bb_v2_comm      V2WireCodec — legacy host wire protocol
+             bb_v2_emulator  V2 pin-state model
+             bb_v2_map       V2 pin ↔ intent/event mapping tables
+             bb_ticks        tick helpers, CPython and MicroPython
+
+tools/       bb_cli.py, the PC-side validation client
+tests/       host-side test suite, runs on CPython
 ```
 
-https://docs.micropython.org/en/latest/reference/reset_boot.html#boot-sequence
+The payloads each peripheral role implements are specified in
+[`beatbox_intermodule_protocol.MD`](beatbox_intermodule_protocol.MD), which is
+the reference for anything module-specific.
 
-## Feeder module
+---
 
-`modules/feeder.py` implements the `FEEDER` CAN module and its A4988 stepper driver.
+## Flashing a board
 
-## CAN inter-module protocol
+A new module appears as a USB **RPI-RP2** drive, running the UF2 bootloader.
+Drag the MicroPython `.uf2` onto it; the board reboots as a USB serial device.
 
-The current CAN inter-module protocol draft is documented in:
+Firmware in use: `ADAFRUIT_FEATHER_RP2040-20260406-v1.28.0.uf2`. The Beatbox
+custom modules use the Adafruit Feather RP2040 as their base, so that build is
+compatible. A different base board or pinout needs a custom build or a new
+`bb_pin_map` entry.
 
-- `../beatbox_intermodule_protocol.MD`
+If the board does not enter bootloader mode:
 
-The MicroPython implementation helpers for CAN identifier packing/parsing live in:
+- press reset twice quickly while holding boot, or
+- from the REPL: `machine.bootloader()`, or
+- from the host: `mpremote bootloader`
 
-- `libs/can_protocol.py`
-- `libs/beatbox_module.py`
+---
 
-Quick host-side validation:
+## Deploying code
+
+Activate the conda environment first.
 
 ```bash
-python -m pytest tests/test_can_protocol.py tests/test_beatbox_can_module_protocol.py -q
+python deploy_module.py <module> --dry-run       # show what would be copied
+python deploy_module.py <module> --as-main --port auto
 ```
 
-## IR barrier module
+`--as-main` installs the module as `main.py`, which MicroPython runs
+automatically after `boot.py`
+([boot sequence](https://docs.micropython.org/en/latest/reference/reset_boot.html#boot-sequence)).
 
-`modules/ir_barrier.py` implements the `IR_BARRIER` CAN module.
+`deploy_module.py` occasionally fails partway through and leaves the board
+unable to enter raw REPL. Reset it with the button or a power cycle and retry.
 
-- Can monitor GPIO lines `0..7`, make sure the lines are all defined in bb_pin_map.py
-- Registers a falling-edge interrupt on every line
-- Sends a CAN event as soon as any one line triggers
-
-Current payloads:
-
-- `IRBarrierCommand.BARRIER_EVENT` → `[line_index, 1]`
-- `IRBarrierCommand.GET_BARRIER_STATUS` response → `[broken_mask, last_triggered_line]`
-
-Host-side validation:
+Manual file operations and the REPL go through `mpremote`:
 
 ```bash
-python -m pytest tests/test_ir_barrier_module.py -q
+mpremote                      # REPL
+mpremote ls
+mpremote cp path/on/host :path/on/device
+mpremote rm :path/on/device
 ```
 
-Deploy to a board using the existing deploy helper:
+---
+
+## Host-side tests
+
+The protocol layers import no hardware modules, so they run on CPython:
 
 ```bash
-python deploy_module.py ir_barrier --dry-run
-python deploy_module.py ir_barrier --as-main --port auto
+python -m pytest tests/ -q
 ```
-`deploy_module.py` script can sometimes fail to copy files successively and leave the board in a
-state where accessing raw REPL is not possible. To work around this you can reset the board by using the 
-reset button or power cycling it.
 
-## Use ISR with MPy
+This covers identifier packing, the CAN decoder, the command grammar and the V2
+mapping. Prefer adding a test here over testing on a board — it is the reason
+those layers are kept free of `machine` and `canio`.
 
-https://docs.micropython.org/en/latest/reference/isr_rules.html#isr-rules
+---
 
-Timer ISR :
+## Operating modes
 
-https://github.com/orgs/micropython/discussions/10713
+`modules/main_module.py` has one deploy-time switch:
+
+```python
+CLI_MODE = False   # default: legacy V2 emulation
+```
+
+**V2 emulation (default).** The main module speaks the legacy BB Mega V2 wire
+protocol on `UART0`: startup and handshake frames, sequence numbers, CRC, pin
+words in and pin states out. The existing `pc_app` connects unchanged. A
+human-readable mirror of all CAN traffic is printed on the USB REPL.
+
+**CLI mode (secondary).** `UART0` carries plain-text commands instead, and the
+V2 emulation is not started — the code is still there, it simply has no
+transport, so no handshake frames pollute the link. For bring-up and validation
+only.
+
+Wiring in both modes: main module `UART0` (`tx=GP0`, `rx=GP1`, 921600 baud) to a
+USB-serial adapter, typically `/dev/ttyUSB0`. Debug logging always stays on the
+USB REPL, never on the UART.
+
+---
 
 ## Validation CLI
 
-`tools/bb_cli.py` drives the main module from a PC to validate the other modules over CAN.
-Text commands are sent on the main module UART; `MainModule.serial_msg_handler` translates
-them into CAN frames and returns the responses on the same link.
-
-Wiring: main module `UART0` (`tx=GP0`, `rx=GP1`, 921600 baud) to a USB-serial adapter,
-which shows up as `/dev/ttyUSB0` by default.
-
-Deploy the main module with `CLI_MODE = True` (top of `modules/main_module.py`). In this mode
-the legacy BB Mega V2 emulation (`V2WireCodec` handshake and framed commands) is not
-started, so the link carries CLI traffic only. Debug logs stay on the USB REPL.
+`tools/bb_cli.py` drives the main module from a PC to exercise the other modules
+over CAN. Deploy with `CLI_MODE = True`:
 
 ```bash
 python deploy_module.py main_module --as-main --port auto
 ```
 
-Usage:
-
 ```bash
-python tools/bb_cli.py                        # interactive prompt (default /dev/ttyUSB0)
+python tools/bb_cli.py                        # interactive prompt
 python tools/bb_cli.py -p /dev/ttyUSB1 -b 921600
 python tools/bb_cli.py -c SCAN                # one-shot, repeatable
-python tools/bb_cli.py -f my_scenario.txt     # replay a script (comments and `sleep <s>`)
-python tools/bb_cli.py --list-commands        # command reference, no serial needed
+python tools/bb_cli.py -f my_scenario.txt     # replay a script (comments, `sleep <s>`)
+python tools/bb_cli.py --list-commands        # reference, no serial needed
 ```
 
 Example session:
@@ -117,45 +155,36 @@ bb> SCAN
 << FOUND_LIGHTING
 bb> STATUS FEEDER
 << FEEDER_STATUS_IDLE
-bb> DUTY 255 0 0        # white=255, red=0, ir=0
+bb> DUTY 255 0 0            # white=255, red=0, ir=0
 bb> LIGHT ON WHITE
-bb> FEED                # request a reward from the feeder
-<< FEEDER_REWARD_DELIVERED
+bb> FEED                    # one reward, feeder owns the retries
+<< FEEDER_REWARD_1          # pellet present
+<< FEEDER_REWARD_0          # pellet taken
+bb> REWARD ON               # direct motor control, for maintenance
+bb> REWARD OFF
 bb> CAN STATUS FEEDER REQ_MODULE 1 0x0A   # raw frame escape hatch
 ```
 
-The main module answers `OK <COMMAND>` when a frame was queued, `ERR <reason>` on a bad
-command, and forwards CAN replies (`FOUND_*`, `*_STATUS_*`, `LIGHTING_DUTY_*`,
-`NOSEPOKE_EVENT_BEAM_*`, `IR_BARRIER_*`, ...).
+The board answers `OK <COMMAND>` when a frame was queued and `ERR <reason>` on a
+bad command, then forwards decoded CAN replies (`FOUND_*`, `*_STATUS_*`,
+`*_REWARD_*`, `LIGHTING_DUTY_*`, `NOSEPOKE_EVENT_BEAM_*`, `IR_BARRIER_*`, ...).
 
-The command table lives in `libs/cli_protocol.py` and is shared by the board and the CLI,
-so both sides always agree on the grammar.
+The command table lives in `libs/cli_protocol.py` and is imported by both the
+board and the CLI, so the two sides cannot disagree on the grammar. Each command
+resolves to an *intent*, the same objects the V2 frontend produces — so the CLI
+and the application exercise identical code paths down to the bus.
 
-Host-side validation:
+---
 
-```bash
-python -m pytest tests/test_cli_protocol.py -q
-```
+## MicroPython constraints worth knowing
 
-
-## Beatbox modules flashing
-
-After receiving your Beatbox modules, when connecting a USB cable to the module, it should appear as a USB RPI-RP2 device.
-The device is running the UF2 bootloader, which allows you to flash firmware onto it.
-
-If the board does not go into bootloader mode, you can press the reset button quickly twice while pressing the boot button to enter bootloader mode.
-If you still cannot enter into bootloader, but can access the REPL, you can use the `machine.bootloader()` command to enter bootloader mode or
-`mpremote bootloader` to enter bootloader mode from the host.
-
-To make it MicroPython compatible, you need to flash the MicroPython firmware on it.
-Download the MicroPython firmware and drag and drop the `.uf2` file to the RPI-RP2 device. 
-The module will reboot and appear as a USB serial device.
-
-The MicroPython firmware use for this project is 'ADAFRUIT_FEATHER_RP2040-20260406-v1.28.0.uf2'.
-Note that the ADAFRUIT_FEATHER_RP2040 board is used as the base for the Beatbox custom modules, so the MicroPython firmware for this board is compatible with the Beatbox modules.
-In order to use the MicroPython firmware with different BeatboxModules using a different pinout or base, you will need either a custom MicroPython firmware or a custom pin mapping file.
-
-Now that the MicroPython firmware is flashed, you can use `mpremote` to copy the module files to the device, or use the `deploy_module.py` script to deploy a module to the device.
-
-'mpremote' is a command line tool that allows you to interact with MicroPython devices over USB or serial. You can use it to copy files, run scripts, and access the REPL.
-
+- **No 3.10+ typing syntax** in shared code (`str | None`, `list[int]`) and no
+  `typing` import: anything the host tests import must load on both runtimes.
+- **Ticks wrap.** `time.ticks_ms/us` roll over (~17.9 min for µs on RP2040).
+  Always compare with `bb_ticks.ticks_diff`, never with `-`.
+- **ISRs must be minimal**: set a flag, allocate nothing, never touch the bus.
+  The owning task consumes the flag.
+  [ISR rules](https://docs.micropython.org/en/latest/reference/isr_rules.html#isr-rules) ·
+  [timer ISRs](https://github.com/orgs/micropython/discussions/10713)
+- **Cooperative scheduling.** Every task shares one loop: a blocking sleep in a
+  callback stalls CAN RX and the serial handler too. Defer instead of blocking.

@@ -1,38 +1,156 @@
-## About CircuitPython and SPI baudrate/frequency configuration
+markdown
+# Beatbox — software architecture
 
-From [circuitpython.org](circuitpython.org) :
+Beatbox is an autonomous behavioural box. A host application runs the
+experimental protocol; the box executes it and reports what the animal does.
+This repository holds both sides: the PC application and the module firmware.
 
-> *CircuitPython is a programming language designed to simplify experimenting and learning to code on low-cost microcontroller boards.*
+---
 
-However, this comes with a tradeoff regarding execution speed AND the ability to configure it.
+## ⚠️ Disclaimer
 
-More specifically, let's tackle a small issue regarding SPI bus speed configuration. Note that this paragraph can be skipped to the TL;DR for a quick answer on how to configure SPI bus speed.
+This is an ongoing development version. Interfaces, CAN payloads and the host
+wire protocol are still moving. See [Roadmap](#roadmap) for the changes that are
+already planned.
 
-The microcontroller (RP2040 here) uses the SPI bus to communicate with the CAN MCP25625 chip (which integrates a CAN Controller and a CAN Transceiver).
+In the Micropython code especially, the previous prototype version is referred as Beatbox V2 or bbv2. 
 
-There are thus two bus frequencies that are relevant here: SPI bus frequency and CAN bus frequency.
-From the microcontroller's perspective, the CAN bus is fairly autonomous after it has been configured, so it's pretty straightforward to use.
+---
 
-The SPI bus, however, is handled by the MCU, and each transaction must be initiated by the MCU as the latter is the controller on the bus (in contrast to the MCP25625, which is the peripheral).
+## Roadmap
 
-The SPI bus driver that handles SPI communication is included in the built-in library packaged with the given CircuitPython firmware. This means that the driver is not easily modifiable by the user.
+Many devlopment tasks are already planned, in a rough order of priority:
+  - Fix the application handshake failing inadvertently
+  - There appears to be a bug in the CAN bus that causes some messages to be dropped by the main if there
+    are too many messages (which can happen in response of a SCAN for example). This needs to be investigated and fixed.
+  - The performance of the Micropython code needs to be evaluated and improved. The current implementation can feel laggy
+    under load, especially when spamming IR barrier events for example.
+      - The CAN bus is not the bottleneck, but the Micropython code is. Micropython Viper and native code can be used to speed up the code.
+        The critical sections are the preferred target of such optimizations.
+      - The CAN bus is actually handled as an async task. It might be worth investigating an interrupt-driven approach.
+      - To improve performance, debounce need to be optimized too.
+  - Graph plotting is to be add on the PC application.
+  - Storing logs needs to be add in the main module and logging needs to be improved to be more consistent.
+  - The repo structure needs to be improved. The current structure is a bit messy and needs to be cleaned up.
+  - Naming of the modules and some files might be confusing because of the previous version. When transitioning to the new version
+    for the app and beatbox firmware, the naming should be improved to avoid confusion and old nomenclature dropped where appropriate.
 
-On another note, when initializing an instance of the MCP2515 (which is the controller chip of the MCP25625), the library expects an SPI bus instance and uses it to initialize an SPIDevice object.
+---
 
-This SPIDevice object is then used for SPI communication. Before each transaction, the SPIDevice takes a lock and reconfigures the SPI bus. **This means that any configuration made by the user is overridden by the MCP2515 initialization.**
+## The chain
 
-Unfortunately, the MCP2515 [does not take a parameter to set the SPI bus speed](https://docs.circuitpython.org/projects/mcp2515/en/latest/api.html#adafruit_mcp2515.MCP2515). In order to be able to set a specific speed, a solution one has is to modify the MCP2515 library to set the baudrate to the desired one when initializing the SPIDevice.
-
-However, libraries in CircuitPython are distributed in the form of `.mpy` files, which are precompiled bytecode libraries. This enables faster startup and less memory usage.
-In order to use a custom version of the MCP2515, one must delete the `.mpy` file, retrieve the `.py` equivalent, and copy it to the same path with the same name (but with a `.py` extension). One can also modify the library `.py` file and then compile it to an `.mpy` using [mpy-cross](https://learn.adafruit.com/welcome-to-circuitpython/library-file-types-and-frozen-libraries#creating-an-mpy-file-3118108).
-
-One could also access the MCP2515 object instance to modify it's SPIDevice member, overriding it with a new SPIDevice object initialized with the correct baudrate.
-
-```python
-def CanManager
+```
+┌────────────┐   serial    ┌─────────────┐    CAN bus    ┌──────────────────┐
+│  host app  │ ◄─────────► │ MAIN module │ ◄───────────► │ peripheral       │
+│  (pc_app)  │   UART0     │  (RP2040)   │   11-bit ID   │ modules (RP2040) │
+└────────────┘             └─────────────┘               └──────────────────┘
+                                                          FEEDER, NOSEPOKE,
+                                                          SCREEN_L/R, LIGHTING,
+                                                          IR_BARRIER, ...
 ```
 
-#### TL;DR 
+The host application talks to exactly one module, `MAIN`. Every other module is
+reached over CAN, and `MAIN` is the only translator between the two worlds.
 
-Set the correct baudrate directly in the MCP2515 `__init__.py` file and replace the `__init__.mpy` with it in the `lib/adafruit_mcp2515` folder on the CIRCUITPY device.
+Peripheral modules are autonomous: they own their sensors, their timing and
+their retry logic, and they report state changes on the bus without being
+polled. `MAIN` routes, it does not run the experiment.
 
+---
+
+## Two host protocols, one core
+
+| Mode | Host speaks | Purpose |
+|---|---|---|
+| **V2 emulation** (default) | the legacy BB Mega V2 wire protocol | run the existing application unchanged |
+| **CLI** (secondary) | plain-text commands | bring-up and validation from a PC, no app needed |
+
+The previous Beatbox generation used an ATmega as the main module, and its
+protocol was tied to hardware: the app drove TTL output pins and read input pins
+back as a bitfield. That protocol is emulated, not reimplemented — the
+application sees the same pin words it always did, while the pins themselves are
+now CAN messages.
+
+CLI mode is a development tool, selected at deploy time. It replaces the V2
+link, so it is never active during an experiment.
+
+---
+
+## Intents and events
+
+The two host protocols must not each grow their own copy of the CAN encoding.
+So `MAIN` is built around two in-process value types that form the only
+interface between transport-specific code and the CAN core:
+
+- **Intent** — *what to emit on the bus*. It already carries the encoded
+  identifier and payload; it is not a wire format, it is the thing a wire format
+  gets turned into. Produced by the CLI parser and by the V2 pin map, consumed
+  by `MainModule.send_intent`.
+- **Event** — *what happened on the bus*. Produced by a single decoder, fanned
+  out to every frontend.
+
+```
+  many producers            narrow, pure            many consumers
+ ┌──────────────┐                                 ┌──────────────┐
+ │ cli_protocol │──┐                           ┌──│ CliFrontend  │
+ │ bb_v2_map    │──┼── Intent ──► CAN ──► Event ──┤ V2Frontend   │
+ │ (future)     │──┘   bb_intents     bb_events   │ (future)     │
+ └──────────────┘                                 └──────────────┘
+```
+
+Adding a host protocol means adding a frontend plus a mapping table. Changing
+the CAN layout means touching `bb_intents` and `bb_events`. Neither change
+propagates past the waist.
+
+An event name is only defined when something dispatches on it: it names payload
+bytes (`attempts=3` rather than `data[0]`), merges several wire encodings into
+one logical meaning, or describes something with no wire origin at all. Frames
+that need none of that decode to a generic event and are only logged.
+
+---
+
+## Layers inside the main module
+
+Each layer translates exactly one representation into the next, owns the layer
+below it, and reaches upward only through injected callables.
+
+| Layer | Translates | Notes |
+|---|---|---|
+| `SerialManager` | bytes ⇄ lines | generic transport, takes a UART by injection |
+| `V2WireCodec` | lines ⇄ V2 pin words | framing, CRC, sequence, handshake; owns the pin-state emulator |
+| `V2Frontend` / `CliFrontend` | pins or text ⇄ Intent / Event | mapping policy only |
+| `MainModule` | Intent / Event ⇄ CAN | owns the frontends, the transport and the CAN manager |
+
+Everything below `main_module.py` is free of `machine` and `canio` imports, so
+the parsers, decoders, mapping tables and the V2 codec are all importable and
+testable on CPython.
+
+---
+
+## Repository layout
+
+```
+code/
+├── pc_app/                  host application (PC)
+│   └── beatbox_protocol/    host wire format: crc.py, message.py
+├── micropython/             module firmware — see its own README
+├── circuitpython/           earlier firmware attempt, superseded
+├── lib/                     legacy, unused
+└── README.md
+```
+
+`beatbox_protocol` is the single definition of the host frame format. The
+application imports it directly; the firmware imports it too, with a flat
+fallback for the on-board layout. Neither side can drift from the other.
+
+---
+
+## Where to read next
+
+- **CAN protocol** — identifier layout, per-module commands and payloads:
+  [`micropython/beatbox_intermodule_protocol.MD`](micropython/beatbox_intermodule_protocol.MD)
+- **Host command grammar** — `micropython/libs/cli_protocol.py`, shared verbatim
+  by the board and `micropython/tools/bb_cli.py`
+- **Firmware workflow** — flashing, deployment, running the tests:
+  [`micropython/README.md`](micropython/README.md)
+```
