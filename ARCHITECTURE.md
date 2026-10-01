@@ -129,7 +129,7 @@ testable on CPython.
 ## Repository layout
 
 ```
-code/
+./
 ├── pc_app/                  host application (PC)
 │   └── beatbox_protocol/    host wire format: crc.py, message.py
 ├── micropython/             module firmware — see its own README
