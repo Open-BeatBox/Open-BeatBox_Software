@@ -3,14 +3,14 @@
 Firmware for the RP2040-based Beatbox modules. For the overall architecture —
 how the host application, the main module and the peripheral modules fit
 together, and what *intents* and *events* are — see the
-[parent README](../README.md).
+[architecture document](../ARCHITECTURE.md).
 
 ---
 
 ## ⚠️ Disclaimer
 
 
-Ongoing development version; see the roadmap in the [parent README](../README.md).
+Ongoing development version; see the roadmap in the [architecture document](../ARCHITECTURE.md).
 Tests scripts and the CLI are not yet stable and some might be broken.
 
 ---

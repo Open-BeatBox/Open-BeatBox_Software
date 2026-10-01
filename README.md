@@ -9,8 +9,6 @@ of the box modules.
   experimental protocol and talks to the `MAIN` module over serial.
 - [`micropython/`](./micropython) — the module firmware (RP2040). See its own
   [README](./micropython/README.md) for flashing, deployment and tests.
-- [`circuitpython/`](./circuitpython) — an earlier firmware attempt, superseded
-  by the MicroPython version.
 - [`ARCHITECTURE.md`](./ARCHITECTURE.md) — how the host application, the main
   module and the peripheral modules fit together.
 
