@@ -131,16 +131,20 @@ testable on CPython.
 ```
 ./
 ├── pc_app/                  host application (PC)
-│   └── beatbox_protocol/    host wire format: crc.py, message.py
 ├── micropython/             module firmware — see its own README
+│   └── libs/beatbox-protocol/   shared host wire format (git submodule)
 ├── circuitpython/           earlier firmware attempt, superseded
-├── lib/                     legacy, unused
 └── README.md
 ```
 
-`beatbox_protocol` is the single definition of the host frame format. The
-application imports it directly; the firmware imports it too, with a flat
-fallback for the on-board layout. Neither side can drift from the other.
+`beatbox_protocol` (crc.py, message.py) is the single definition of the host
+frame format. It lives in its own repository, shared by the application and the
+firmware: `pc_app` installs it as a dependency, and the firmware gets it through
+the `micropython/libs/beatbox-protocol` submodule, with a flat fallback for the
+on-board layout. Neither side can drift from the other.
+
+The application is tested against `beatbox-protocol` commit `d76b83b7`; the
+submodule is pinned to that commit.
 
 ---
 
