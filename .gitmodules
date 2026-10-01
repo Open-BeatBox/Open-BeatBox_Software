@@ -1,3 +1,6 @@
 [submodule "micropython/libs/beatbox-protocol"]
 	path = micropython/libs/beatbox-protocol
 	url = https://gitlab.com/icm-institute/rnd-unit-public/rnd_unit_libs/beatbox-protocol.git
+[submodule "micropython/libs/ILI9341-parallel-TFT-driver-for-micropython"]
+	path = micropython/libs/ILI9341-parallel-TFT-driver-for-micropython
+	url = https://github.com/HughMaingauche/ILI9341-parallel-TFT-driver-for-micropython.git

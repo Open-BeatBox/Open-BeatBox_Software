@@ -133,7 +133,6 @@ testable on CPython.
 ├── pc_app/                  host application (PC)
 ├── micropython/             module firmware — see its own README
 │   └── libs/beatbox-protocol/   shared host wire format (git submodule)
-├── circuitpython/           earlier firmware attempt, superseded
 └── README.md
 ```
 

@@ -11,6 +11,3 @@ Thumbs.db
 
 # JetBrains IDE
 *.idea*
-
-# CircuitPython library bundle
-lib/adafruit-circuitpython-bundle-9.x-mpy-20250725/*
