@@ -1,0 +1,3 @@
+[submodule "micropython/libs/beatbox-protocol"]
+	path = micropython/libs/beatbox-protocol
+	url = https://gitlab.com/icm-institute/rnd-unit-public/rnd_unit_libs/beatbox-protocol.git

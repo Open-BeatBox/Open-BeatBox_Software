@@ -1,0 +1,17 @@
+name: beatbox
+channels:
+  - conda-forge
+dependencies:
+  - python>=3.11
+  - ipython  # just for convenience
+  - configobj
+  - pyserial
+  - qtpy
+  - pyqt=5
+  - pyqtgraph
+  - qdarkstyle
+  - pytest  # for testing only
+  - pytest-qt
+  - pip
+  - pip:
+    - git+https://gitlab.com/icm-institute/rnd-unit-public/rnd_unit_libs/beatbox-protocol.git

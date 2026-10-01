@@ -1,0 +1,32 @@
+[build-system]
+requires = ["setuptools>=64"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "beatbox"
+version = "0.1.0"
+description = "BeatBox behavioural apparatus controller"
+requires-python = ">=3.11"
+dependencies = [
+    "beatbox-protocol @ git+https://gitlab.com/icm-institute/rnd-unit-public/rnd_unit_libs/beatbox-protocol.git",
+    "configobj",
+    "pyserial",
+    "qtpy",
+    "PyQt5",
+    "pyqtgraph",
+    "qdarkstyle",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest",
+    "pytest-qt",
+    "ipython",
+]
+
+[project.scripts]
+beatbox = "beatbox.gui.arduino_control_app:main"
+
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["beatbox*"]

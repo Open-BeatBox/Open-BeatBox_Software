@@ -1,0 +1,9 @@
+name: bb_mpy
+channels:
+  - conda-forge
+dependencies:
+  - python>=3.11
+  - ipython  # just for convenience
+    #  - mpremote
+  - pytest  # for testing only
+  - pyserial  # host-side serial tools (tools/bb_cli.py)
