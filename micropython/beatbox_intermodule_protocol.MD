@@ -99,10 +99,13 @@ Status values:
 
 ### 4.1 Feeder (`MODULE=0x2`)
 
-| TYPE | CMD | Name             | Direction | Default PRIO | Payload |
-|------|-----|------------------|-----------|--------------|---------|
-| 10   | 01  | REQUEST_REWARD   | Request   | P1           | none |
-| 11   | 01  | REWARD_DELIVERED | Response  | P3           | `attempts:uint8` (`1..20`) |
+| TYPE | CMD | Name              | Direction | Default PRIO | Payload                    |
+|------|-----|-------------------|-----------|--------------|----------------------------|
+| 10   | 00  | GET_REWARD_STATUS | Request   | P1           | none                       |
+| 10   | 01  | REQUEST_REWARD    | Request   | P1           | none                       |
+| 10   | 02  | REQUEST_ON        | Request   | P1           | none                       |
+| 10   | 03  | REQUEST_OFF       | Request   | P1           | none                       |
+| 11   | 00  | REWARD_STATUS     | Response  | P3           | `attempts:uint8` (`1..20`) |
 
 `REQUEST_REWARD` must be addressed to `MODULE=0x2`; the feeder ignores it on
 `BROADCAST`, so a reward is never delivered by accident.
