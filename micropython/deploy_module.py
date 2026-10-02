@@ -38,21 +38,18 @@ SHARED_SPECS: tuple[CopySpec, ...] = (
 
 MODULE_EXTRA_SPECS: dict[str, tuple[CopySpec, ...]] = {
     "blinky": (),
-    "can_dummy_rx": (),
-    "can_dummy_tx": (),
-    "communicator": (),
     "feeder": (),
     "ir_barrier": (),
     "nosepoke": (),
     "main_module": (
         CopySpec(ROOT / "libs/serial_manager.py", ":serial_manager.py"),
         CopySpec(ROOT / "libs/cli_protocol.py", ":cli_protocol.py"),
-        CopySpec(ROOT / "libs/bb_frontends.py", ":bb_frontends.py"),
-        CopySpec(ROOT / "libs/bb_events.py", ":bb_events.py"),
-        CopySpec(ROOT / "libs/bb_intents.py", ":bb_intents.py"),
-        CopySpec(ROOT / "libs/bb_v2_map.py", ":bb_v2_map.py"),
-        CopySpec(ROOT / "libs/bb_v2_comm.py", ":bb_v2_comm.py"),
-        CopySpec(ROOT / "libs/bb_v2_emulator.py", ":bb_v2_emulator.py"),
+        CopySpec(ROOT / "modules/main_module/bb_frontends.py", ":bb_frontends.py"),
+        CopySpec(ROOT / "modules/main_module/bb_events.py", ":bb_events.py"),
+        CopySpec(ROOT / "modules/main_module/bb_intents.py", ":bb_intents.py"),
+        CopySpec(ROOT / "modules/main_module/bb_v2_map.py", ":bb_v2_map.py"),
+        CopySpec(ROOT / "modules/main_module/bb_v2_comm.py", ":bb_v2_comm.py"),
+        CopySpec(ROOT / "modules/main_module/bb_v2_emulator.py", ":bb_v2_emulator.py"),
     ),
     "screenmodule": (
         CopySpec(
@@ -80,7 +77,8 @@ MODULE_EXTRA_SPECS: dict[str, tuple[CopySpec, ...]] = {
 
 
 def _build_module_spec(module_name: str, as_main: bool) -> CopySpec:
-    module_file = ROOT / "modules" / f"{module_name}.py"
+    module_dir = ROOT / "modules" / module_name
+    module_file = module_dir / f"{module_name}.py" if module_dir.is_dir() else ROOT / "modules" / f"{module_name}.py"
     remote_name = ":main.py" if as_main else f":{module_name}.py"
     return CopySpec(module_file, remote_name)
 
