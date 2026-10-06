@@ -18,21 +18,24 @@ In the Micropython code especially, the previous prototype version is referred a
 
 ## Roadmap
 
-Many devlopment tasks are already planned, in a rough order of priority:
-  - Fix the application handshake failing inadvertently
-  - There appears to be a bug in the CAN bus that causes some messages to be dropped by the main if there
-    are too many messages (which can happen in response of a SCAN for example). This needs to be investigated and fixed.
-  - The performance of the Micropython code needs to be evaluated and improved. The current implementation can feel laggy
-    under load, especially when spamming IR barrier events for example.
-      - The CAN bus is not the bottleneck, but the Micropython code is. Micropython Viper and native code can be used to speed up the code.
-        The critical sections are the preferred target of such optimizations.
-      - The CAN bus is actually handled as an async task. It might be worth investigating an interrupt-driven approach.
-      - To improve performance, debounce need to be optimized too.
-  - Graph plotting is to be add on the PC application.
-  - Storing logs needs to be add in the main module and logging needs to be improved to be more consistent.
-  - The repo structure needs to be improved. The current structure is a bit messy and needs to be cleaned up.
-  - Naming of the modules and some files might be confusing because of the previous version. When transitioning to the new version
-    for the app and beatbox firmware, the naming should be improved to avoid confusion and old nomenclature dropped where appropriate.
+Several development tasks are already planned, in rough order of priority:
+
+- **Fix the intermittent handshake failure** between the application and `MAIN`.
+- **Investigate CAN frame loss.** `MAIN` appears to drop messages under bursts of
+  traffic — a `SCAN` reply, for example. The cause needs to be identified and fixed.
+- **Evaluate and improve MicroPython performance.** The current implementation can
+  feel laggy under load, notably when IR barrier events arrive in rapid succession.
+  - The bottleneck is the MicroPython code, not the CAN bus. Viper and native
+    emitters should be applied to the critical sections first.
+  - The CAN bus is currently serviced by an async task; an interrupt-driven
+    approach is worth investigating.
+  - Debounce handling also needs optimising.
+- **Add graph plotting** to the PC application.
+- **Add log storage** to the main module, and make logging consistent across modules.
+- **Clean up the repository structure**, which is currently somewhat disorganised.
+- **Revise naming.** Module and file names inherited from the previous generation are
+  confusing. When migrating the app and firmware to the new version, adopt clearer
+  names and drop the old nomenclature where appropriate.
 
 ---
 
@@ -155,4 +158,3 @@ submodule is pinned to that commit.
   by the board and `micropython/tools/bb_cli.py`
 - **Firmware workflow** — flashing, deployment, running the tests:
   [`micropython/README.md`](micropython/README.md)
-```

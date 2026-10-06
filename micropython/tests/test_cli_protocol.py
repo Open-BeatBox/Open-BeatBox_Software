@@ -5,6 +5,7 @@ import pytest
 
 ROOT = pathlib.Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "libs"))
+sys.path.insert(0, str(ROOT / "modules" / "main_module"))
 
 import cli_protocol  # noqa: E402
 from can_protocol import (  # noqa: E402

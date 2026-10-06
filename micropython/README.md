@@ -23,17 +23,18 @@ libs/        shared infrastructure
              beatbox_module  ModuleManager base class, status codes
              cli_protocol    text command grammar (shared with tools/bb_cli.py)
              bb_pin_map      per-board pin assignments
+             bb_ticks        tick helpers, CPython and MicroPython
 
 modules/     module roles and the main module's protocol layers
-             main_module     host-facing module: wiring and CAN fan-out
              feeder, ir_barrier, ...   one file per peripheral role
-             bb_intents      Intent + one builder per logical action
-             bb_events       Event + the CAN decoder
-             frontends       CliFrontend, V2Frontend
-             bb_v2_comm      V2WireCodec — legacy host wire protocol
-             bb_v2_emulator  V2 pin-state model
-             bb_v2_map       V2 pin ↔ intent/event mapping tables
-             bb_ticks        tick helpers, CPython and MicroPython
+             main_module/
+                          bb_intents      Intent + one builder per logical action
+                          bb_events       Event + the CAN decoder
+                          bb_v2_comm      V2WireCodec — legacy host wire protocol
+                          bb_v2_emulator  V2 pin-state model
+                          bb_v2_map       V2 pin ↔ intent/event mapping tables
+                          frontends       CliFrontend, V2Frontend
+                          main_module     host-facing module: wiring and CAN fan-out
 
 tools/       bb_cli.py, the PC-side validation client
 tests/       host-side test suite, runs on CPython
@@ -42,6 +43,7 @@ tests/       host-side test suite, runs on CPython
 The payloads each peripheral role implements are specified in
 [`beatbox_intermodule_protocol.MD`](beatbox_intermodule_protocol.MD), which is
 the reference for anything module-specific.
+The `libs/can_protocol.py` is the implementation of the identifier layout and the per-module command tables.
 
 ---
 
