@@ -445,4 +445,8 @@ def main():
     feeder = FeederModule()
     asyncio.run(feeder.start_managers())
 
-main()
+
+# Deployed as :main.py the board runs this as __main__, so the module still
+# auto-starts; importing it (tests, REPL) no longer touches the hardware.
+if __name__ == "__main__":
+    main()
