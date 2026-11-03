@@ -4,7 +4,8 @@
   "description": "<p>Open-BEATBox (Open - BEhavioural and AuTonomous operant Box) is an open-source, modular, low-cost platform for autonomous home-cage operant conditioning and long-duration behavioural data acquisition in rodents.</p><p>This repository holds the PC application that runs the experiments and the MicroPython firmware of the box modules.</p><p>Two firmware libraries are Git submodules and are not included in this archive: beatbox-protocol (commit fbb6d08) and ILI9341-parallel-TFT-driver-for-micropython (commit 6c82d2f); see the README to fetch them.</p><p>Project website: <a href=\"https://open-beatbox.github.io/\">https://open-beatbox.github.io/</a>. Manual: <a href=\"https://open-beatbox.github.io/docs/manual/\">https://open-beatbox.github.io/docs/manual/</a>.</p>",
   "creators": [
     {
-      "name": "Euvrard, Marine"
+      "name": "Euvrard, Marine",
+      "affiliation": "Sorbonne Université, Institut du Cerveau - Paris Brain Institute - ICM, Inserm U1127, CNRS UMR 7225, AP-HP, Paris, France"
     },
     {
       "name": "Benzina, Nabil",
