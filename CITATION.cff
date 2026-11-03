@@ -1,6 +1,3 @@
-# TODO before publishing the release:
-#   - affiliation of Marine Euvrard (none in the preprint)
-#   - add the preprint under preferred-citation once its DOI exists
 cff-version: 1.2.0
 message: "If you use Open-BEATBox in published work, please cite it as below."
 title: "Open-BEATBox Software: PC application and module firmware"
@@ -11,6 +8,7 @@ abstract: "Open-BEATBox (Open - BEhavioural and AuTonomous operant Box) is an op
 authors:
   - family-names: "Euvrard"
     given-names: "Marine"
+    affiliation: "Sorbonne Université, Institut du Cerveau - Paris Brain Institute - ICM, Inserm U1127, CNRS UMR 7225, AP-HP, Paris, France"
   - family-names: "Benzina"
     given-names: "Nabil"
     affiliation: "Sorbonne Université, Institut du Cerveau - Paris Brain Institute - ICM, Inserm U1127, CNRS UMR 7225, AP-HP, Paris, France"
