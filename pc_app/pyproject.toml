@@ -8,7 +8,7 @@ version = "0.1.0"
 description = "BeatBox behavioural apparatus controller"
 requires-python = ">=3.11"
 dependencies = [
-    "beatbox-protocol @ git+https://gitlab.com/icm-institute/rnd-unit-public/rnd_unit_libs/beatbox-protocol.git",
+    "beatbox-protocol @ git+https://gitlab.com/icm-institute/rnd-unit-public/rnd_unit_libs/beatbox-protocol.git@fbb6d08abbe466b12cc2a82274453b4e9483519b",
     "configobj",
     "pyserial",
     "qtpy",

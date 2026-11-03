@@ -11,3 +11,6 @@ Thumbs.db
 
 # JetBrains IDE
 *.idea*
+
+# Test caches
+.pytest_cache/
