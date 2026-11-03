@@ -1,5 +1,5 @@
 # TODO before publishing the release:
-#   - full given name of Y. Travert-Jouanneau, affiliation of Marine Euvrard
+#   - affiliation of Marine Euvrard (none in the preprint)
 #   - add the preprint under preferred-citation once its DOI exists
 cff-version: 1.2.0
 message: "If you use Open-BEATBox in published work, please cite it as below."
@@ -31,7 +31,7 @@ authors:
     given-names: "Guillaume"
     affiliation: "Sorbonne Université, Institut du Cerveau - Paris Brain Institute - ICM, Inserm U1127, CNRS UMR 7225, AP-HP, Paris, France"
   - family-names: "Travert-Jouanneau"
-    given-names: "Y."
+    given-names: "Youenn"
     affiliation: "Sorbonne Université, Institut du Cerveau - Paris Brain Institute - ICM, Inserm U1127, CNRS UMR 7225, AP-HP, Paris, France"
   - family-names: "Lavielle"
     given-names: "Oriana"
