@@ -1,92 +1,226 @@
+"""Tests for the generic line-oriented serial transport.
+
+SerialManager must stay protocol agnostic: it queues outgoing messages,
+terminates them with a newline, reassembles incoming lines (even when they
+are split across reads) and hands complete, stripped lines to the registered
+callbacks without ever dying on a faulty callback or a faulty UART.
+"""
+
+import asyncio
 import pathlib
 import sys
 
+import pytest
+
 ROOT = pathlib.Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "libs"))
-sys.path.insert(0, str(ROOT / "libs" / "beatbox-protocol"))
 
-from libs.serial_manager import BeatBoxCommManager
-
-
-def crc8(data, polynomial=0x07, init=0):
-    if isinstance(data, str):
-        data = data.encode()
-    crc = init
-    for byte in data:
-        crc ^= byte
-        for _ in range(8):
-            if crc & 0x80:
-                crc = ((crc << 1) ^ polynomial) & 0xFF
-            else:
-                crc = (crc << 1) & 0xFF
-    return crc
+import bb_ticks  # noqa: E402
+from serial_manager import SerialManager  # noqa: E402
 
 
-def _wire_frame(command, data_type="s", seq=0, payload=""):
-    body = f"{command}:{data_type}{seq:02x}{payload}"
-    return f"{body}{crc8(body.encode()):02x}"
+class FakeSerial:
+    """Minimal UART stub: `chunks` are served one per read() call."""
+
+    def __init__(self, chunks=None, fail_write=False, fail_read=False):
+        self.chunks = list(chunks or [])
+        self.written = []
+        self.fail_write = fail_write
+        self.fail_read = fail_read
+
+    def any(self):
+        if self.fail_read:
+            raise OSError("read failure")
+        return len(self.chunks)
+
+    def read(self):
+        return self.chunks.pop(0) if self.chunks else None
+
+    def write(self, data):
+        if self.fail_write:
+            raise OSError("write failure")
+        self.written.append(data)
+        return len(data)
 
 
-def _decode_queue(comm):
-    return [item.decode() if isinstance(item, bytes) else item for item in comm.serial_manager.tx_queue]
+def run_handler(manager, timeout=0.15):
+    """Run serial_handler_task for a short while, then cancel it."""
+
+    async def _run():
+        task = asyncio.ensure_future(manager.serial_handler_task())
+        try:
+            await asyncio.wait_for(task, timeout)
+        except asyncio.TimeoutError:
+            pass
+
+    asyncio.new_event_loop().run_until_complete(_run())
 
 
-def test_startup_frames_are_raw_r00():
-    comm = BeatBoxCommManager()
-    comm.send_startup_frames()
-    sent = _decode_queue(comm)
-    assert sent == ["starting:r00", "inited:r00"]
+# --------------------------------------------------------------------------
+# send_message / _write_to_data_port
+# --------------------------------------------------------------------------
+
+def test_send_message_queues_bytes_untouched_and_encodes_everything_else():
+    manager = SerialManager()
+
+    manager.send_message(b"already:bytes")
+    manager.send_message("a:string")
+    manager.send_message(42)
+
+    assert manager.tx_queue == [b"already:bytes", b"a:string", b"42"]
 
 
-def test_set_command_sends_ack_then_done_and_updates_outputs():
-    comm = BeatBoxCommManager()
-    comm.handshake_status = comm.HANDSHAKE_DONE_STATUS
+def test_write_terminates_messages_with_crlf():
+    serial = FakeSerial()
+    manager = SerialManager(serial=serial)
 
-    # Word 0x0201 -> bit0(reward)=1, bit9(light)=1
-    incoming = _wire_frame("set", data_type="x", seq=0, payload="0201")
-    comm.process_message(incoming)
-
-    sent = _decode_queue(comm)
-    assert len(sent) == 2
-    assert sent[0].startswith("ack:s00set_from00000000000")
-    assert sent[1].startswith("done:s00")
-    assert comm.emulator.get_output_pin_states_as_word() == "10000000010"
+    assert manager._write_to_data_port(b"hello") is True
+    assert serial.written == [b"hello\r\n"]
 
 
-def test_crc_mismatch_signals_error_only():
-    comm = BeatBoxCommManager()
-    comm.handshake_status = comm.HANDSHAKE_DONE_STATUS
+def test_write_accepts_str_and_does_not_duplicate_existing_terminators():
+    serial = FakeSerial()
+    manager = SerialManager(serial=serial)
 
-    valid = _wire_frame("set", data_type="x", seq=0, payload="0000")
-    # Corrupt last CRC nibble
-    invalid = valid[:-1] + ("0" if valid[-1] != "0" else "1")
-    comm.process_message(invalid)
+    manager._write_to_data_port("plain")
+    manager._write_to_data_port(b"has_cr\r")
+    manager._write_to_data_port(b"has_crlf\r\n")
+    manager._write_to_data_port(b"has_lf\n")
 
-    sent = _decode_queue(comm)
-    assert len(sent) == 1
-    assert sent[0].startswith("error:s00CRC mismatch(")
-
-
-def test_seq_mismatch_keeps_firmware_quirk_and_continues():
-    comm = BeatBoxCommManager()
-    comm.handshake_status = comm.HANDSHAKE_DONE_STATUS
-    comm.seq_nb = 2
-
-    incoming = _wire_frame("ready", data_type="s", seq=1, payload="")
-    comm.process_message(incoming)
-
-    sent = _decode_queue(comm)
-    assert len(sent) == 3
-    assert sent[0].startswith("error:s02Seq mismatch(")
-    assert sent[1].startswith("ack:s01ready")
-    assert sent[2].startswith("ready:sloop")
+    assert serial.written == [b"plain\r\n", b"has_cr\r\n",
+                              b"has_crlf\r\n", b"has_lf\n"]
 
 
-def test_input_change_sends_state_frame_with_seq():
-    comm = BeatBoxCommManager()
-    comm.on_input_pin_changes({"nose_poke": 1, "right_response": 1})
+def test_write_fails_gracefully_without_serial_or_on_uart_error():
+    assert SerialManager()._write_to_data_port(b"no serial") is False
+    assert SerialManager(serial=FakeSerial(fail_write=True))._write_to_data_port(
+        b"boom") is False
 
-    sent = _decode_queue(comm)
-    assert len(sent) == 1
-    # bit0 and bit2 set => 0x05, framed as state:x00 + 05 + crc
-    assert sent[0].startswith("state:x0005")
+
+# --------------------------------------------------------------------------
+# _read_from_data_port
+# --------------------------------------------------------------------------
+
+def test_read_decodes_bytes_and_returns_empty_string_when_idle():
+    manager = SerialManager(serial=FakeSerial([b"data\n"]))
+
+    assert manager._read_from_data_port() == "data\n"
+    assert manager._read_from_data_port() == ""
+    assert SerialManager()._read_from_data_port() == ""
+
+
+def test_read_swallows_uart_errors():
+    manager = SerialManager(serial=FakeSerial(fail_read=True))
+
+    assert manager._read_from_data_port() == ""
+
+
+# --------------------------------------------------------------------------
+# serial_handler_task
+# --------------------------------------------------------------------------
+
+def test_handler_marks_itself_running_and_started():
+    manager = SerialManager(serial=FakeSerial())
+    assert manager.running is False
+    assert manager.status == "OK"
+
+    run_handler(manager, timeout=0.05)
+
+    assert manager.running is True
+    assert manager.status == "STARTED"
+
+
+def test_handler_drains_tx_queue_in_order():
+    serial = FakeSerial()
+    manager = SerialManager(serial=serial)
+    manager.send_message("first")
+    manager.send_message("second")
+    manager.send_message(b"third")
+
+    run_handler(manager)
+
+    assert serial.written == [b"first\r\n", b"second\r\n", b"third\r\n"]
+    assert manager.tx_queue == []
+
+
+def test_handler_dispatches_complete_lines_to_every_callback():
+    manager = SerialManager(serial=FakeSerial([b"one:cmd\ntwo:cmd\n"]))
+    first, second = [], []
+    manager.register_rx_callback(first.append)
+    manager.register_rx_callback(second.append)
+
+    run_handler(manager)
+
+    assert first == ["one:cmd", "two:cmd"]
+    assert second == ["one:cmd", "two:cmd"]
+    assert manager.status != "ERROR"
+
+
+def test_handler_reassembles_lines_split_across_reads():
+    manager = SerialManager(serial=FakeSerial([b"split", b":com", b"mand\n"]))
+    received = []
+    manager.register_rx_callback(received.append)
+
+    run_handler(manager)
+
+    assert received == ["split:command"]
+
+
+def test_handler_keeps_incomplete_line_buffered_and_strips_whitespace():
+    manager = SerialManager(serial=FakeSerial([b"  done:cmd  \r\n\n\npartial"]))
+    received = []
+    manager.register_rx_callback(received.append)
+
+    run_handler(manager)
+
+    # Blank lines are dropped, trailing \r stripped, partial line kept for later
+    assert received == ["done:cmd"]
+    assert manager.rx_buffer == "partial"
+
+
+def test_handler_survives_a_failing_callback_and_flags_an_error():
+    def broken(_line):
+        raise ValueError("callback blew up")
+
+    manager = SerialManager(serial=FakeSerial([b"cmd:one\n", b"cmd:two\n"]))
+    received = []
+    manager.register_rx_callback(broken)
+    manager.register_rx_callback(received.append)
+
+    run_handler(manager)
+
+    assert manager.status == "ERROR"
+    # A broken callback must not stop the other callbacks nor the loop
+    assert received == ["cmd:one", "cmd:two"]
+
+
+def test_handler_updates_last_activity_only_on_incoming_data():
+    manager = SerialManager(serial=FakeSerial())
+    idle_stamp = manager.last_activity
+    run_handler(manager, timeout=0.05)
+    assert manager.last_activity == idle_stamp
+
+    manager = SerialManager(serial=FakeSerial([b"cmd\n"]))
+    before = manager.last_activity
+    run_handler(manager, timeout=0.05)
+    assert bb_ticks.ticks_diff(manager.last_activity, before) > 0
+
+
+@pytest.mark.parametrize("step_us, expected_status", [
+    (45_000, "ERROR"),       # one pass takes 45ms > 40ms budget
+    (2_000_000, "STARTED"),  # more than 1s without rx: back to idle status
+])
+def test_handler_reports_slow_processing_and_resets_when_idle(
+        monkeypatch, step_us, expected_status):
+    clock = {"now": 0}
+
+    def fake_ticks_us():
+        clock["now"] += step_us
+        return clock["now"]
+
+    monkeypatch.setattr(bb_ticks, "ticks_us", fake_ticks_us)
+
+    manager = SerialManager(serial=FakeSerial())
+    run_handler(manager, timeout=0.05)
+
+    assert manager.status == expected_status

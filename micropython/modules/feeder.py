@@ -196,7 +196,11 @@ class FeederModule(ModuleManager):
         self.reward_in_progress = False       # autonomous cycle running
         self._reward_requested = False
         self._abort_delivery = False
-        self._pellet_detected = False         # latched by the IRQ
+        # Beam breaks are counted, not latched: the delivery loop and
+        # pellet_monitor both consume them, and a single boolean let whichever
+        # polled first swallow the edge the other one was waiting for.
+        self._pellet_edges = 0                # incremented by the IRQ
+        self._pellet_edges_seen = {"delivery": 0, "monitor": 0}
         self._reported_pellet_state = 0       # last state published on the bus
         self._clear_since_ms = None
         self._last_attempts = 0
@@ -233,9 +237,19 @@ class FeederModule(ModuleManager):
         )
 
     def _on_pellet_irq(self, _pin):
-        # Keep the IRQ handler minimal: no allocation, no CAN. The flag is
-        # consumed by the delivery task and by pellet_monitor.
-        self._pellet_detected = True
+        # Keep the IRQ handler minimal: no allocation, no CAN. Masked to stay a
+        # small int so the increment never allocates.
+        self._pellet_edges = (self._pellet_edges + 1) & 0xFF
+
+    def _pellet_edge_pending(self, consumer):
+        """True while `consumer` has not acknowledged the latest beam break."""
+        return self._pellet_edges != self._pellet_edges_seen[consumer]
+
+    def _take_pellet_edge(self, consumer):
+        """Acknowledge beam breaks for `consumer` only, return True if any."""
+        pending = self._pellet_edge_pending(consumer)
+        self._pellet_edges_seen[consumer] = self._pellet_edges
+        return pending
 
     @property
     def pellet_present(self):
@@ -316,14 +330,13 @@ class FeederModule(ModuleManager):
     async def pellet_monitor(self):
         """Publish REWARD_STATUS on every pellet presence change.
 
-        Arrival is taken from the IRQ latch so a fast transit is never missed;
-        removal needs the beam clear for PELLET_CLEAR_MS to debounce it.
+        Arrival is taken from the IRQ edge count so a fast transit is never
+        missed; removal needs the beam clear for PELLET_CLEAR_MS to debounce it.
         """
         while True:
             now = bb_ticks.ticks_ms()
 
-            if self._pellet_detected or self.pellet_present:
-                self._pellet_detected = False
+            if self._take_pellet_edge("monitor") or self.pellet_present:
                 self._clear_since_ms = None
                 if self._reported_pellet_state == 0:
                     self._reported_pellet_state = 1
@@ -390,7 +403,7 @@ class FeederModule(ModuleManager):
 
     async def _run_reward_cycle(self):
         """Return the number of attempts needed to deliver a pellet, 0 if none was delivered."""
-        self._pellet_detected = False
+        self._take_pellet_edge("delivery")  # drop edges from a previous cycle
         for attempt in range(1, self.max_reward_attempts + 1):
             if self._abort_delivery:
                 break
@@ -408,7 +421,7 @@ class FeederModule(ModuleManager):
         """Wait for the current rotation to complete, stopping early on pellet arrival."""
         elapsed = 0.0
         while self.stepper.is_running and elapsed < ROTATION_TIMEOUT_S:
-            if self._pellet_detected or self._abort_delivery:
+            if self._pellet_edge_pending("delivery") or self._abort_delivery:
                 break
             await asyncio.sleep(POLL_PERIOD_S)
             elapsed += POLL_PERIOD_S
@@ -416,20 +429,24 @@ class FeederModule(ModuleManager):
             self.stepper.stop_rotation()
 
     async def _wait_for_pellet(self, timeout_s):
-        """Poll the flag set by the IR barrier IRQ until timeout_s elapsed."""
+        """Poll the edge count fed by the IR barrier IRQ until timeout_s elapsed."""
         elapsed = 0.0
         while elapsed < timeout_s:
-            if self._pellet_detected:
+            if self._take_pellet_edge("delivery"):
                 return True
             if self._abort_delivery:
                 return False
             await asyncio.sleep(POLL_PERIOD_S)
             elapsed += POLL_PERIOD_S
-        return self._pellet_detected
+        return self._take_pellet_edge("delivery")
 
 
 def main():
     feeder = FeederModule()
     asyncio.run(feeder.start_managers())
 
-main()
+
+# Deployed as :main.py the board runs this as __main__, so the module still
+# auto-starts; importing it (tests, REPL) no longer touches the hardware.
+if __name__ == "__main__":
+    main()

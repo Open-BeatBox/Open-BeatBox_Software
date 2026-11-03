@@ -1,5 +1,6 @@
 import asyncio
-import time
+
+import bb_ticks
 
 from machine import Pin
 from bb_pin_map import IRBarrierPins as PinMap
@@ -44,7 +45,7 @@ class IRBarrierModule(ModuleManager):
             broken = (sensor.value() == 0)
             self._last_broken.append(broken)
 
-            self._last_accept_us.append(time.ticks_us())
+            self._last_accept_us.append(bb_ticks.ticks_us())
 
             sensor.irq(
                 trigger=Pin.IRQ_FALLING | Pin.IRQ_RISING,
@@ -75,7 +76,7 @@ class IRBarrierModule(ModuleManager):
     def _make_irq_handler(self, line_index):
         # IRQ handler: only record timestamp + new state (broken/clear)
         def _handler(_pin):
-            ts = time.ticks_us()
+            ts = bb_ticks.ticks_us()
             broken = (self.sensors[line_index].value() == 0)
             # record event; payload will be sent later in async task
             self._buf_push((ts, line_index, broken))
@@ -107,7 +108,7 @@ class IRBarrierModule(ModuleManager):
                     continue  # no logical state change
 
                 # require minimum time between accepted changes for this line
-                if time.ticks_diff(ts_us, self._last_accept_us[line_index]) < self.DEBOUNCE_US:
+                if bb_ticks.ticks_diff(ts_us, self._last_accept_us[line_index]) < self.DEBOUNCE_US:
                     continue
 
                 # accept change
@@ -156,4 +157,8 @@ def main():
     ir_barrier = IRBarrierModule()
     asyncio.run(ir_barrier.start_managers())
 
-main()
+
+# Deployed as :main.py the board runs this as __main__, so the module still
+# auto-starts; importing it (tests, REPL) no longer touches the hardware.
+if __name__ == "__main__":
+    main()

@@ -35,6 +35,7 @@ class LightingModule(ModuleManager):
         }
         self._active_group_index = None
         self._configure_led_driver()
+        self.led.off() # turn off user led
 
     def _configure_led_driver(self):
         self.led_driver.reset()
@@ -142,4 +143,7 @@ def main():
     lighting = LightingModule()
     asyncio.run(lighting.start_managers())
 
-main()
+# Deployed as :main.py the board runs this as __main__, so the module still
+# auto-starts; importing it (tests, REPL) no longer touches the hardware.
+if __name__ == "__main__":
+    main()

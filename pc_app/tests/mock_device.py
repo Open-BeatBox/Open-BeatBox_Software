@@ -31,7 +31,7 @@ def make_mock_communicator():
 
 def make_mock_device(stage='S1', name='Test Box',
                      experiment_folder='', subject_info=None,
-                     **kwargs) -> BBDeviceWidget:
+                     **kwargs) -> "BBDeviceWidget":
     """Create a BBDeviceWidget with a mock communicator.
 
     No real serial port needed. ``experiment_folder`` should point
