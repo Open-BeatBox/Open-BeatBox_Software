@@ -33,7 +33,7 @@ modules/     module roles and the main module's protocol layers
                           bb_v2_comm      V2WireCodec — legacy host wire protocol
                           bb_v2_emulator  V2 pin-state model
                           bb_v2_map       V2 pin ↔ intent/event mapping tables
-                          frontends       CliFrontend, V2Frontend
+                          bb_frontends    CliFrontend, V2Frontend
                           main_module     host-facing module: wiring and CAN fan-out
 
 tools/       bb_cli.py, the PC-side validation client
@@ -108,7 +108,7 @@ those layers are kept free of `machine` and `canio`.
 
 ## Operating modes
 
-`modules/main_module.py` has one deploy-time switch:
+`modules/main_module/main_module.py` has one deploy-time switch:
 
 ```python
 CLI_MODE = False   # default: legacy V2 emulation
