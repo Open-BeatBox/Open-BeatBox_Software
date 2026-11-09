@@ -6,6 +6,7 @@ build-backend = "setuptools.build_meta"
 name = "beatbox"
 version = "0.1.0"
 description = "BeatBox behavioural apparatus controller"
+license = {text = "AGPL-3.0-or-later"}
 requires-python = ">=3.11"
 dependencies = [
     "beatbox-protocol @ git+https://gitlab.com/icm-institute/rnd-unit-public/rnd_unit_libs/beatbox-protocol.git@fbb6d08abbe466b12cc2a82274453b4e9483519b",
@@ -23,6 +24,12 @@ dev = [
     "pytest-qt",
     "ipython",
 ]
+
+[project.urls]
+Homepage = "https://open-beatbox.github.io/"
+Documentation = "https://open-beatbox.github.io/docs/manual/"
+Repository = "https://github.com/Open-BeatBox/Open-BeatBox_Software"
+Issues = "https://github.com/Open-BeatBox/Open-BeatBox_Software/issues"
 
 [project.scripts]
 beatbox = "beatbox.gui.arduino_control_app:main"

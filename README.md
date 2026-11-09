@@ -58,9 +58,25 @@ Third-party libraries under `micropython/libs/` keep their own licences:
 
 ## Citing
 
-If you use this software, please cite it with the metadata in
-[`CITATION.cff`](./CITATION.cff) (GitHub's *Cite this repository* button). Each
-release is archived on Zenodo with its own DOI.
+If you use this software in published work, please cite **both**:
+
+1. the reference preprint of the platform:
+
+   > Euvrard M, Benzina N, Domingues D, Mondragón-González SL, Huzard D, Penderia G, Travert-Jouanneau Y, Lavielle O, Lousada E, Schreiweis C, Lorenz A, Pavlov P, Ajili Z, Lebegue L, Tissier P, Burguière E. "Open-BEATBox: an open-source autonomous operant chamber for high-throughput data acquisition of complex behaviour." bioRxiv, 2026 (DOI to be added when the preprint is posted).
+
+2. the Zenodo record of the release you used. Each release of this repository
+   is archived on Zenodo with its own DOI; the version described in the
+   preprint is release `biorxiv-v1` (DOI: to be added once release `biorxiv-v1`
+   is published on Zenodo). `CITATION.cff` carries the metadata (GitHub's
+   *Cite this repository* button). The firmware has no record of its own: it
+   is part of this repository, so cite this record for it too.
+
+## Related repositories
+
+- [Open-BeatBox_Hardware](https://github.com/Open-BeatBox/Open-BeatBox_Hardware) — CAD, 3D-printing and laser-cutting files, KiCad boards (CERN-OHL-S-2.0)
+- [Open-BeatBox_Documentation](https://github.com/Open-BeatBox/Open-BeatBox_Documentation) — manual, assembly tutorials, Master BOM (CC-BY-4.0)
+- [Open-BeatBox.github.io](https://github.com/Open-BeatBox/Open-BeatBox.github.io) — project website and manual build pipeline
+- [Open-BeatBox_Firmware](https://github.com/Open-BeatBox/Open-BeatBox_Firmware) — placeholder that points to `micropython/` here
 
 ## Project links
 
