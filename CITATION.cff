@@ -76,7 +76,9 @@ preferred-citation:
   title: "Open-BEATBox: an open-source autonomous operant chamber for high-throughput data acquisition of complex behaviour"
   journal: "bioRxiv"
   year: 2026
-  notes: "Preprint DOI to be added when posted"
+  month: 11
+  doi: "10.64898/2026.11.07.765109"
+  url: "https://www.biorxiv.org/content/10.64898/2026.11.07.765109v1"
   authors:
     - family-names: "Euvrard"
       given-names: "Marine"
